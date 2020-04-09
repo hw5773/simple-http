@@ -38,9 +38,9 @@ typedef struct attribute_st {
 } attribute_t;
 
 typedef struct http_st {
+  int type;
   int version;
   int method;
-  int type;
   int num_of_attr;
   int hlen;
   attribute_t *hdr;
@@ -51,8 +51,10 @@ typedef struct http_st {
 typedef struct request_st {
 } request_t;
 
-int init_http_message(http_t **http);
+http_t *init_http_message(int type, int version, int method, uint8_t *domain, int dlen,
+    uint8_t *content, int clen);
 int add_header_attribute(http_t *http, uint8_t *key, int klen, uint8_t *value, int vlen);
+int del_header_attribute(http_t *http, uint8_t *key, int klen);
 
 int http_make_request(uint8_t *domain, uint32_t dlen, uint8_t *content, uint32_t clen,
     uint8_t *msg, uint32_t *mlen);
