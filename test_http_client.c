@@ -60,11 +60,21 @@ int main(int argc, char *argv[])
   if (ret < 0) goto err;
 
   ret = send_tls_message(ssl, reqhdr, reqhlen);
-  if (ret != reqhlen) goto err;
+  if (ret != reqhlen) 
+  {
+    emsg("ret != reqhlen: ret: %d, reqhlen: %d", ret, reqhlen);
+    goto err;
+  }
 
   if (reqdlen > 0)
+  {
     ret = send_tls_message(ssl, reqdata, reqdlen);
-  if (ret != reqdlen) goto err;
+    if (ret != reqdlen)
+    {
+      emsg("ret != reqdlen: ret: %d, reqdlen: %d", ret, reqdlen);
+      goto err;
+    }
+  }
 
   resplen = recv_tls_message(ssl, respbuf, BUF_SIZE);
 

@@ -44,6 +44,7 @@ typedef struct http_st {
   int type;
   int version;
   int method;
+  int code;
 
   char *host;
   int hlen;

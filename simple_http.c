@@ -138,7 +138,7 @@ void http_set_domain(http_t *http, const char *domain, int dlen)
   assert(domain != NULL);
   assert(dlen > 0);
 
-  http->host = domain;
+  http->host = (char *)domain;
   http->hlen = dlen;
 
   ffinish();
@@ -151,7 +151,7 @@ void http_set_content(http_t *http, const char *content, int clen)
   assert(content != NULL);
   assert(clen > 0);
 
-  http->content = content;
+  http->content = (char *)content;
   http->clen = clen;
 
   ffinish();
@@ -211,7 +211,7 @@ attribute_t *find_header_attribute(http_t *http, char *key, int klen)
 
 int add_header_attribute(http_t *http, char *key, int klen, char *value, int vlen)
 {
-  fstart("http: %p, key: %s, klen: %d, value: %s, vlen: %d", http, key, klen, value, vlen);
+  fstart("http: %p, key: %p, klen: %d, value: %p, vlen: %d", http, key, klen, value, vlen);
   assert(http != NULL);
   assert(key != NULL);
   assert(klen > 0);
@@ -524,6 +524,84 @@ err:
   return -1;
 }
 
+int http_parse_attribute(http_t *http, const char *p, int l)
+{
+  fstart("http: %p, p: %p, l: %d", http, p, l);
+  if (l <= 0) goto err;
+
+  const char *key, *value, *q;
+  int klen, vlen;
+
+  while (*p == ' ')
+    p++;
+
+  value = strchr(p, ':');
+  dmsg("value: %p", value);
+  if (!value || (value - p > l))
+  {
+    if (!strncmp(p, "GET", 3))
+    {
+      http->type = HTTP_TYPE_REQUEST;
+      http->method = HTTP_METHOD_GET;
+      p += 3;
+    }
+    else if (!strncmp(p, "HTTP", 4))
+    {
+      http->type = HTTP_TYPE_RESPONSE;
+      http->method = HTTP_METHOD_NONE;
+      p += 4;
+
+      if (*p == '/')
+      {
+        p += 1;
+        if (*p == '1' && *(p+1) == ' ')
+        {
+          http->version = HTTP_VERSION_1_0;
+          p += 1;
+        }
+        else if (*p == '1' && *(p+1) == '.' && *(p+2) == '1')
+        {
+          http->version = HTTP_VERSION_1_1;
+          p += 3;
+        }
+        else if (*p == '2')
+        {
+          http->version = HTTP_VERSION_2;
+          p += 1;
+        }
+      }
+      while (*p == ' ')
+        p++;
+      q = p;
+      p = strchr(q, ' ');
+      http->code = char_to_int(q, p - q);
+    }
+  }
+  else
+  {
+    key = p;
+    klen = value - key;
+    value = value + 1;
+    while (*value == ' ')
+      value++;
+    vlen = l - (value - key);
+
+    add_header_attribute(http, key, klen, value, vlen);
+
+    attribute_t *attr;
+    attr = find_header_attribute(http, key, klen);
+    dmsg("key (%d bytes): %s", attr->klen, attr->key);
+    dmsg("value (%d bytes): %s", attr->vlen, attr->value);
+  }
+
+  ffinish();
+  return 1;
+
+err:
+  ferr();
+  return -1;
+}
+
 int http_deserialize(uint8_t *buf, int len, http_t *http)
 {
   fstart("buf: %p, len: %d, http: %p", buf, len, http);
@@ -554,6 +632,9 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
     while (*p == ' ')
       p++;
 
+    http_parse_attribute(http, p, l);
+
+/*
     if ((l > 0) && !strncmp((const char *)p, "GET", 3))
     {
       p += 3;
@@ -586,13 +667,16 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
       }
     }
 
-    if ((l > 0) && !strncmp((const char *)p, "Host:", 5) == 0)
+    if ((l > 0) && !strncmp((const char *)p, "Host:", 5))
     {
+      dmsg("Host:\n%s", p);
       p += 5;
 
+      dmsg("p: %p", p);
       while (*p == ' ')
         p++;
 
+      dmsg("nptr: %p, p: %p", nptr, p);
       if (nptr - p > 0)
       {
         http->host = (char *)malloc(nptr - p + 1);
@@ -614,7 +698,7 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
         p++;
       http->dlen = char_to_int(p, nptr - p);
     }
-
+*/
     cptr = nptr + DELIMITER_LEN;
 
 #ifdef DEBUG
