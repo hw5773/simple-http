@@ -12,6 +12,9 @@
 #define DELIMITER             "\r\n"
 #define DELIMITER_LEN         2
 
+#define COLON                 ": "
+#define COLON_LEN             2
+
 #define DOMAIN_DELIMITER      "\n\n"
 #define DOMAIN_DELIMITER_LEN  2
 
@@ -30,35 +33,50 @@
 #define HTTP_TYPE_RESPONSE    1
 
 typedef struct attribute_st {
-  uint8_t *key;
+  char *key;
   int klen;
-  uint8_t *value;
+  char *value;
   int vlen;
-  attribute_t *next;
+  struct attribute_st *next;
 } attribute_t;
 
 typedef struct http_st {
   int type;
   int version;
   int method;
-  int num_of_attr;
+
+  char *host;
   int hlen;
+  char *content;
+  int clen;
+
+  int num_of_attr;
   attribute_t *hdr;
-  int dlen;
+  
   uint8_t *data;
+  int dlen;
 } http_t;
 
-typedef struct request_st {
-} request_t;
+attribute_t *init_attribute(char *key, int klen, char *value, int vlen);
+void free_attribute(attribute_t *attr);
 
-http_t *init_http_message(int type, int version, int method, uint8_t *domain, int dlen,
-    uint8_t *content, int clen);
-int add_header_attribute(http_t *http, uint8_t *key, int klen, uint8_t *value, int vlen);
-int del_header_attribute(http_t *http, uint8_t *key, int klen);
+http_t *init_http_message(int type);
+void free_http_message(http_t *http);
 
-int http_make_request(uint8_t *domain, uint32_t dlen, uint8_t *content, uint32_t clen,
-    uint8_t *msg, uint32_t *mlen);
-int http_parse_request(uint8_t *msg, uint32_t mlen, request_t **req);
-int http_parse_response(uint8_t *msg, uint32_t mlen);
+void http_set_version(http_t *http, int version);
+void http_set_method(http_t *http, int method);
+void http_set_domain(http_t *http, const char *domain, int dlen);
+void http_set_content(http_t *http, const char *content, int clen);
+void http_set_default_attributes(http_t *http);
+
+attribute_t *find_header_attribute(http_t *http, char *key, int klen);
+int add_header_attribute(http_t *http, char *key, int klen, char *value, int vlen);
+void del_header_attribute(http_t *http, char *key, int klen);
+void print_header(http_t *http);
+
+uint8_t *http_get_data(http_t *http, int *dlen);
+
+int http_serialize(http_t *http, uint8_t *hdr, int *hlen, uint8_t *data, int *dlen);
+int http_deserialize(uint8_t *buf, int len, http_t *http);
 
 #endif /* __SIMPLE_HTTP_H__ */
