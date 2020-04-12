@@ -31,7 +31,6 @@ attribute_t *init_attribute(char *key, int klen, char *value, int vlen)
   return ret;
 
 err:
-
   if (ret)
   {
     if (ret->key)
@@ -163,7 +162,7 @@ void http_set_default_attributes(http_t *http)
   assert(http != NULL);
 
   const char *user_agent_key = "User-Agent";
-  const char *user_agent_value = "Wget/1.17.1 (linux-gnu)";
+  const char *user_agent_value = "curl/7.47.0";
 
   const char *accept_key = "Accept";
   const char *accept_value = "*/*";
@@ -335,215 +334,291 @@ uint8_t *http_get_data(http_t *http, int *dlen)
   fstart("http: %p, dlen: %p", http, dlen);
   assert(http != NULL);
   
+  attribute_t *attr;
+  const char *key = "Transfer-Encoding";
+  const char *chunked = "chunked";
+  int klen;
+
+  klen = (int)strlen(key);
+
   if (dlen)
-    *dlen = http->dlen;
+  {
+    attr = find_header_attribute(http, key, klen);
+
+    if (attr && attr->vlen == strlen(chunked) && !strncmp(attr->value, chunked, attr->vlen))
+      *dlen = -1;
+    else
+      *dlen = http->dlen;
+  }
 
   ffinish("data: %p", http->data);
   return http->data;
 }
 
-// TODO: Should check the buffer overflow by adding the maximum value of the buffer
-int http_make_get_request(http_t *http, uint8_t *hdr, int *hlen)
+int http_make_version(http_t *http, buf_t *msg)
 {
-  fstart("http: %p, hdr: %p, hlen: %p", http, hdr, hlen);
-  assert(http != NULL);
-  assert(http->host != NULL);
-  assert(http->hlen > 0);
-  assert(hdr != NULL);
-  assert(hlen != NULL);
-
-  const char *method = "GET /";
-  const char *host = "Host: ";
-  const char *version;
-  uint8_t *p;
-  attribute_t *attr;
-  int vlen, hostlen;
-
-  p = hdr;
+  fstart("http: %p, msg: %p", http, msg);
 
   switch (http->version)
   {
     case HTTP_VERSION_1_0:
-      version = " HTTP/1";
+      update_buf_mem(msg, "HTTP/1", 6);
       break;
     case HTTP_VERSION_1_1:
-      version = " HTTP/1.1";
-      break;
-    case HTTP_VERSION_2:
-      version = " HTTP/2";
+      update_buf_mem(msg, "HTTP/1.1", 8);
       break;
     default:
-      emsg("Unsupported version: %d", http->version);
+      emsg("Unsupported Version: %d", http->version);
       goto err;
   }
 
-  memcpy(p, method, 5);
-  p += 5;
+  ffinish();
+  return HTTP_SUCCESS;
 
-  if (http->clen > 0)
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_make_code_and_reason(http_t *http, buf_t *msg)
+{
+  fstart("http: %p, msg: %p", http, msg);
+
+  const char *code, *reason;
+  int clen, rlen;
+
+  if (!http->code)
   {
-    memcpy(p, http->content, http->clen);
-    p += http->clen;
+    emsg("HTTP Code is not set");
+    goto err;
   }
 
-  vlen = (int)strlen(version);
-  memcpy(p, version, vlen);
-  p += vlen;
-  memcpy(p, DELIMITER, DELIMITER_LEN);
-  p += DELIMITER_LEN;
+  code = status_code[http->code];
+  reason = reason_phrase[http->code];
 
-  hostlen = (int)strlen(host);
-  memcpy(p, host, hostlen);
-  p += hostlen;
-  memcpy(p, http->host, http->hlen);
-  p += http->hlen;
-  memcpy(p, DELIMITER, DELIMITER_LEN);
-  p += DELIMITER_LEN;
+  clen = (int) strlen(code);
+  rlen = (int) strlen(reason);
 
-  attr = http->hdr;
-  while (attr)
-  {
-    memcpy(p, attr->key, attr->klen);
-    p += attr->klen;
-    memcpy(p, COLON, COLON_LEN);
-    p += COLON_LEN;
-    memcpy(p, attr->value, attr->vlen);
-    p += attr->vlen;
-    memcpy(p, DELIMITER, DELIMITER_LEN);
-    p += DELIMITER_LEN;
-    attr = attr->next;
-  }
-  memcpy(p, DELIMITER, DELIMITER_LEN);
-  p += DELIMITER_LEN;
-
-  *hlen = p - hdr;
-
-  dmsg("HTTP Header:\n%s\n", hdr);
+  update_buf_mem(msg, code, clen);
+  update_buf_mem(msg, reason, rlen);
 
   ffinish();
-  return 1;
+  return HTTP_SUCCESS;
 
 err:
   ferr();
-  return -1;
+  return HTTP_FAILURE;
 }
 
-int http_make_post_request(http_t *http, uint8_t *hdr, int *hlen)
+int http_make_request_line(http_t *http, buf_t *msg)
 {
-  fstart("http: %p, hdr: %p, hlen: %p", http, hdr, hlen);
+  fstart("http: %p, msg: %p", http, msg);
   assert(http != NULL);
-  assert(hdr != NULL);
-  assert(hlen != NULL);
+  assert(msg != NULL);
 
-  ffinish();
-  return 1;
-
-err:
-  ferr();
-  return -1;
-}
-
-int http_make_put_request(http_t *http, uint8_t *hdr, int *hlen)
-{
-  fstart("http: %p, hdr: %p, hlen: %p", http, hdr, hlen);
-  assert(http != NULL);
-  assert(hdr != NULL);
-  assert(hlen != NULL);
-
-  ffinish();
-  return 1;
-
-err:
-  ferr();
-  return -1;
-}
-
-int http_make_delete_request(http_t *http, uint8_t *hdr, int *hlen)
-{
-  fstart("http: %p, hdr: %p, hlen: %p", http, hdr, hlen);
-  assert(http != NULL);
-  assert(hdr != NULL);
-  assert(hlen != NULL);
-
-  ffinish();
-  return 1;
-
-err:
-  ferr();
-  return -1;
-}
-
-int http_serialize(http_t *http, uint8_t *hdr, int *hlen, uint8_t *data, int *dlen)
-{
-  fstart("http: %p, hdr: %p, hlen: %p, data: %p, dlen: %p", http, hdr, hlen, data, dlen);
-  assert(http != NULL);
-  assert(hdr != NULL);
-  assert(hlen != NULL);
-  
   int ret;
 
-  if (http->type == HTTP_TYPE_REQUEST)
+  switch (http->method)
   {
-    if (http->method == HTTP_METHOD_GET)
-    {
-      ret = http_make_get_request(http, hdr, hlen);
-    }
-    else if (http->method == HTTP_METHOD_POST)
-    {
-      ret = http_make_post_request(http, hdr, hlen);
-    }
-    else if (http->method == HTTP_METHOD_PUT)
-    {
-      ret = http_make_put_request(http, hdr, hlen);
-    }
-    else if (http->method == HTTP_METHOD_DELETE)
-    {
-      ret = http_make_delete_request(http, hdr, hlen);
-    }
-    else
-    {
-      emsg("Unsupported method: method: %d", http->method);
+    case HTTP_METHOD_GET:
+      ret = update_buf_mem(msg, "GET ", 4);
+      break;
+    case HTTP_METHOD_POST:
+      ret = update_buf_mem(msg, "POST ", 5);
+      break;
+    case HTTP_METHOD_PUT:
+      ret = update_buf_mem(msg, "PUT ", 4);
+      break;
+    case HTTP_METHOD_DELETE:
+      ret = update_buf_mem(msg, "DELETE ", 7);
+      break;
+    default:
+      emsg("Unsupported Method");
       goto err;
-    }
-    
-    if (ret < 0) goto err;
-  }
-  else if (http->type == HTTP_TYPE_RESPONSE)
-  {
-
   }
 
-  data = http->data;
-  *dlen = http->dlen;
+  if (ret < 0) goto err;
+
+  if (http->abs_path && http->alen > 0)
+    ret = update_buf_mem(msg, http->abs_path, http->alen);
+  else
+    ret = update_buf_mem(msg, "/ ", 2);
+
+  ret = http_make_version(http, msg);
+  if (ret == HTTP_FAILURE) goto err;
+
+  ADD_CRLF(msg);
+
+  ret = update_buf_mem(msg, "Host: ", 6);
+  if (ret < 0) goto err;
+
+  ret = update_buf_mem(msg, http->host, http->hlen);
+  if (ret < 0) goto err;
+
+  ADD_CRLF(msg);
 
   ffinish();
-  return 1;
+  return HTTP_SUCCESS;
 
 err:
   ferr();
-  return -1;
+  return HTTP_FAILURE;
 }
 
-int http_parse_attribute(http_t *http, const char *p, int l)
+int http_make_status_line(http_t *http, buf_t *msg)
+{
+  fstart("http: %p, msg: %p", http, msg);
+  assert(http != NULL);
+  assert(msg != NULL);
+
+  int ret;
+
+  ret = http_make_version(http, msg);
+  if (ret < 0) goto err;
+  
+  ret = add_buf_char(msg, ' ');
+  if (ret < 0) goto err;
+
+  ret = http_make_code_and_reason(http, msg);
+  if (ret < 0) goto err;
+
+  ADD_CRLF(msg);
+
+  ffinish();
+  return HTTP_SUCCESS;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_make_message_header(http_t *http, buf_t *msg)
+{
+  fstart("http: %p, msg: %p", http, msg);
+
+  attribute_t *attr;
+
+  attr = http->hdr;
+
+  while (attr)
+  {
+    ret = update_buf_mem(msg, attr->key, attr->klen);
+    if (ret < 0) goto err;
+    COLON(msg);
+
+    ret = update_buf_mem(msg, attr->value, attr->vlen);
+    if (ret < 0) goto err;
+    ADD_CRLF(msg);
+  }
+
+  ADD_CRLF(msg);
+
+  ffinish();
+  return HTTP_SUCCESS;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_make_message_body(http_t *http, buf_t *msg)
+{
+  fstart("http: %p, msg: %p", http, msg);
+
+  int ret;
+
+  ffinish();
+  return HTTP_SUCCESS;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_serialize(http_t *http, uint8_t *msg, int max, int *mlen)
+{
+  fstart("http: %p, msg: %p, max: %d, mlen: %p", http, msg, max, mlen);
+  assert(http != NULL);
+  assert(msg != NULL);
+  assert(max > 0);
+  assert(mlen != NULL);
+  
+  int ret;
+  buf_t *buf;
+
+  init_alloc_buf_mem(&buf, max);
+
+  if (http->type == HTTP_TYPE_REQUEST)
+    ret = http_make_request_line(http, buf);
+  else if (http->type == HTTP_TYPE_RESPONSE)
+    ret = http_make_status_line(http, buf);
+  if (ret < 0) goto err;
+
+  ret = http_make_message_header(http, buf);
+  if (ret < 0) goto err;
+
+  ret = http_make_message_body(http, buf);
+  if (ret < 0) goto err;
+
+  *mlen = get_buf_len(buf);
+  memcpy(msg, get_buf_data(buf), *mlen);
+
+  ffinish();
+  return HTTP_SUCCESS;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_parse_message_header(http_t *http, const char *p, int l)
 {
   fstart("http: %p, p: %p, l: %d", http, p, l);
+  dmsg("p: %s", p);
   if (l <= 0) goto err;
 
-  const char *key, *value, *q;
+  const char *key, *value, *end, *q;
   int klen, vlen;
 
+  end = p + l;
   while (*p == ' ')
     p++;
 
   value = strchr(p, ':');
-  dmsg("value: %p", value);
   if (!value || (value - p > l))
   {
     if (!strncmp(p, "GET", 3))
     {
       http->type = HTTP_TYPE_REQUEST;
       http->method = HTTP_METHOD_GET;
-      p += 3;
+
+      while (*p != '/')
+        p++;
+
+      q = p;
+
+      while (*q != ' ')
+        q++;
+
+      if (q - p == 1)
+      {
+        http->content = INDEX_FILE;
+        http->clen = INDEX_FILE_LEN;
+      }
+      else if (q - p > 1)
+      {
+        http->content = (char *)malloc(q - p);
+        if (!http->content) goto err;
+        memset(http->content, 0x0, q - p);
+        memcpy(http->content, p + 1, q - p - 1);
+        http->clen = q - p - 1;
+        dmsg("Content (%d bytes): %s", http->clen, http->content);
+      }
+      else
+      {
+        emsg("Error in parsing the content name");
+        goto err;
+      }
     }
     else if (!strncmp(p, "HTTP", 4))
     {
@@ -586,12 +661,44 @@ int http_parse_attribute(http_t *http, const char *p, int l)
       value++;
     vlen = l - (value - key);
 
-    add_header_attribute(http, key, klen, value, vlen);
+    if (!strncmp(key, "Host:", 5))
+    {
+      dmsg("Host:\n%s", p);
+      p += 5;
 
-    attribute_t *attr;
-    attr = find_header_attribute(http, key, klen);
-    dmsg("key (%d bytes): %s", attr->klen, attr->key);
-    dmsg("value (%d bytes): %s", attr->vlen, attr->value);
+      dmsg("p: %p", p);
+      while (*p == ' ')
+        p++;
+
+      if (end - p > 0)
+      {
+        http->host = (char *)malloc(end - p + 1);
+        if (!http->host) goto err;
+        memset(http->host, 0x0, end - p + 1);
+        memcpy(http->host, p, end - p);
+        http->hlen = end - p;
+      }
+      else
+      {
+        emsg("Error in parsing the domain name");
+        goto err;
+      }
+    }
+    else if ((l > 0) && !strncmp((const char *)p, "Content-Length:", 15))
+    {
+      while (*p == ' ')
+        p++;
+      http->dlen = char_to_int(p, end - p);
+    }
+    else
+    {
+      add_header_attribute(http, key, klen, value, vlen);
+
+      attribute_t *attr;
+      attr = find_header_attribute(http, key, klen);
+      dmsg("key (%d bytes): %s", attr->klen, attr->key);
+      dmsg("value (%d bytes): %s", attr->vlen, attr->value);
+    }
   }
 
   ffinish();
@@ -609,22 +716,24 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
   assert(len > 0);
   assert(http != NULL);
 
-  int l;
-  const char *cptr, *nptr, *p, *q;
+  const char *cptr, *nptr, *p, *start;
+  int start_line;
 #ifdef DEBUG
-  uint8_t buf[BUF_LEN] = {0, };
+  int l;
+  uint8_t debug[BUF_LEN] = {0, };
 #endif /* DEBUG */
 
-  cptr = buf;
+  start = (const char *)buf;
+  cptr = (const char *)buf;
+  start_line = 0;
 
-  while ((nptr = strstr(cptr, DELIMITER)))
+  while ((nptr = strstr(cptr, CRLF)))
   {
-    l = nptr - cptr;
-
 #ifdef DEBUG
-    memcpy(buf, cptr, l);
-    buf[l + 1] = 0;
-    dmsg("Token (%d bytes): %s", l, buf);
+    l = nptr - cptr;
+    memcpy(debug, cptr, l);
+    debug[l + 1] = 0;
+    dmsg("Token (%d bytes): %s", l, debug);
 #endif /* DEBUG */
 
     p = cptr;
@@ -632,79 +741,18 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
     while (*p == ' ')
       p++;
 
-    http_parse_attribute(http, p, l);
-
-/*
-    if ((l > 0) && !strncmp((const char *)p, "GET", 3))
-    {
-      p += 3;
-
-      while (*p != '/')
-        p++;
-
-      q = p;
-
-      while (*q != ' ')
-        q++;
-
-      if (q - p == 1)
-      {
-        http->content = INDEX_FILE;
-        http->clen = INDEX_FILE_LEN;
-      }
-      else if (q - p > 1)
-      {
-        http->content = (char *)malloc(q - p);
-        if (!http->content) goto err;
-        memset(http->content, 0x0, q - p);
-        memcpy(http->content, p + 1, q - p - 1);
-        http->clen = q - p - 1;
-      }
-      else
-      {
-        emsg("Error in parsing the content name");
-        goto err;
-      }
-    }
-
-    if ((l > 0) && !strncmp((const char *)p, "Host:", 5))
-    {
-      dmsg("Host:\n%s", p);
-      p += 5;
-
-      dmsg("p: %p", p);
-      while (*p == ' ')
-        p++;
-
-      dmsg("nptr: %p, p: %p", nptr, p);
-      if (nptr - p > 0)
-      {
-        http->host = (char *)malloc(nptr - p + 1);
-        if (!http->host) goto err;
-        memset(http->host, 0x0, nptr - p + 1);
-        memcpy(http->host, p, nptr - p);
-        http->hlen = nptr - p;
-      }
-      else
-      {
-        emsg("Error in parsing the domain name");
-        goto err;
-      }
-    }
-
-    if ((l > 0) && !strncmp((const char *)p, "Content-Length:", 15))
-    {
-      while (*p == ' ')
-        p++;
-      http->dlen = char_to_int(p, nptr - p);
-    }
-*/
-    cptr = nptr + DELIMITER_LEN;
+    if (!start_line)
+      http_parse_start_line(http, p, l);
+    else
+      http_parse_message_header(http, p, l);
+    cptr = nptr + CRLF_LEN;
 
 #ifdef DEBUG
-    memset(buf, 0x0, BUF_LEN);
+    memset(debug, 0x0, BUF_LEN);
 #endif /* DEBUG */
   }
+
+  dmsg("len: %d, p - start: %lu", len, p - start);
 
   http->data = p;
 
@@ -717,10 +765,6 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
 
   ffinish();
   return 1;
-
-err:
-  ferr();
-  return -1;
 }
 
 /**

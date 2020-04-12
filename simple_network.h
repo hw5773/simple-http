@@ -6,7 +6,7 @@
 #include <netdb.h>
 #include <openssl/ssl.h>
 
-#define TIME_OUT 10
+#define TIME_OUT 10000
 
 int send_tcp_message(int fd, uint8_t *buf, int len);
 int recv_tcp_message(int fd, uint8_t *buf, int max);

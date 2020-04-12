@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
+#include <errno.h>
 
 unsigned long get_current_timestamp(void)
 {
@@ -112,9 +113,12 @@ int recv_tls_message(SSL *ssl, uint8_t *buf, int max)
   do {
     rcvd = SSL_read(ssl, buf + offset, max - offset);
     if (rcvd >= 0)
+    {
+      dmsg("Received: %d bytes", rcvd);
       offset += rcvd;
+    }
     curr = get_current_timestamp();
-  } while (rcvd < 0 || (curr - base <= 10));
+  } while (offset <= 0 && (curr - base <= TIME_OUT));
 
   ffinish();
   return offset;
@@ -123,7 +127,8 @@ int recv_tls_message(SSL *ssl, uint8_t *buf, int max)
 int open_connection(const char *domain, uint16_t port, int nonblock)
 {
   fstart("domain: %s, port: %u, nonblock: %d", domain, port, nonblock);
-  int sock;
+  int sock, ret;
+  unsigned long base, curr;
   struct hostent *host;
   struct sockaddr_in addr;
 
@@ -150,10 +155,26 @@ int open_connection(const char *domain, uint16_t port, int nonblock)
   if (nonblock)
     fcntl(sock, F_SETFL, O_NONBLOCK);
 
-  if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+  base = get_current_timestamp();
+  while (1)
   {
-    emsg("connect() error");
-    goto err;
+    ret = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+    if (!ret) break;
+    else if (ret < 0)
+    {
+      if (errno != EINPROGRESS && errno != EALREADY )
+      {
+        emsg("connect() error: %d", errno);
+        goto err;
+      }
+    }
+
+    curr = get_current_timestamp();
+    if (curr - base >= TIME_OUT)
+    {
+      emsg("connect() timeout");
+      goto err;
+    }
   }
 
   ffinish();

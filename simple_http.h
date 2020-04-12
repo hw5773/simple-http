@@ -3,20 +3,22 @@
 
 #include <inttypes.h>
 #include <string.h>
-#include "buf.h"
+#include "http_status.h"
 
-#define BUF_LEN           256
-#define INDEX_FILE        "/index.html"
-#define INDEX_FILE_LEN    12
+#define BUF_LEN               256
+#define INDEX_FILE            "/index.html"
+#define INDEX_FILE_LEN        12
 
-#define DELIMITER             "\r\n"
-#define DELIMITER_LEN         2
-
-#define COLON                 ": "
-#define COLON_LEN             2
+#define CRLF                  "\r\n"
+#define CRLF_LEN              2
+#define ADD_CRLF(buf)         add_buf_char(buf, '\r'); add_buf_char(buf, '\n');
+#define ADD_COLON(buf)        add_buf_char(buf, ':'); add_buf_char(buf, ' ');
 
 #define DOMAIN_DELIMITER      "\n\n"
 #define DOMAIN_DELIMITER_LEN  2
+
+#define HTTP_SUCCESS          1
+#define HTTP_FAILURE          -1
 
 #define HTTP_VERSION_NONE     0
 #define HTTP_VERSION_1_0      1
@@ -48,8 +50,8 @@ typedef struct http_st {
 
   char *host;
   int hlen;
-  char *content;
-  int clen;
+  char *abs_path;
+  int alen;
 
   int num_of_attr;
   attribute_t *hdr;
@@ -67,7 +69,7 @@ void free_http_message(http_t *http);
 void http_set_version(http_t *http, int version);
 void http_set_method(http_t *http, int method);
 void http_set_domain(http_t *http, const char *domain, int dlen);
-void http_set_content(http_t *http, const char *content, int clen);
+void http_set_abs_path(http_t *http, const char *abs_path, int alen);
 void http_set_default_attributes(http_t *http);
 
 attribute_t *find_header_attribute(http_t *http, char *key, int klen);
