@@ -392,7 +392,7 @@ int http_make_code_and_reason(http_t *http, buf_t *msg)
   fstart("http: %p, msg: %p", http, msg);
 
   const char *code, *reason;
-  int clen, rlen;
+  int ret, clen, rlen;
 
   if (!http->code)
   {
@@ -407,6 +407,8 @@ int http_make_code_and_reason(http_t *http, buf_t *msg)
   rlen = (int) strlen(reason);
 
   update_buf_mem(msg, (uint8_t *)code, clen);
+  ret = add_buf_char(msg, ' ');
+  if (ret < 0) goto err;
   update_buf_mem(msg, (uint8_t *)reason, rlen);
 
   ffinish();
@@ -913,15 +915,42 @@ err:
 
 int http_parse_request_message_body(http_t *http, buf_t *buf, FILE *fp)
 {
+  fstart("http: %p, buf: %p, fp: %p", http, buf, fp);
+  assert(http != NULL);
+  assert(buf != NULL);
+
+  int ret;
+  ret = HTTP_SUCCESS;
+
+  switch (http->method)
+  {
+    case HTTP_METHOD_GET:
+      ret = HTTP_SUCCESS;
+      break;
+    case HTTP_METHOD_POST:
+      emsg("Not implemented");
+      goto err;
+    case HTTP_METHOD_PUT:
+      emsg("Not implemented");
+      goto err;
+    case HTTP_METHOD_DELETE:
+      emsg("Not implemented");
+      goto err;
+    default:
+      break;
+  }
+
+  ffinish();
+  return ret;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
 }
 
 int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
 {
-}
-
-int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
-{
-  fstart("http: %p, buf: %p", http, buf);
+  fstart("http: %p, buf: %p, fp: %p", http, buf, fp);
   assert(http != NULL);
   assert(buf != NULL);
 
@@ -1052,6 +1081,35 @@ int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
 out:
   ffinish();
   return HTTP_SUCCESS;
+}
+
+int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
+{
+  fstart("http: %p, buf: %p", http, buf);
+  assert(http != NULL);
+  assert(buf != NULL);
+
+  int ret;
+  ret = HTTP_SUCCESS;
+
+  switch (http->type)
+  {
+    case HTTP_TYPE_REQUEST:
+      ret = http_parse_request_message_body(http, buf, fp);
+      break;
+    case HTTP_TYPE_RESPONSE:
+      ret = http_parse_response_message_body(http, buf, fp);
+      break;
+    default:
+      goto err;
+  }
+
+  ffinish();
+  return ret;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
 }
 
 int http_deserialize(uint8_t *buf, int len, http_t *http, FILE *fp)

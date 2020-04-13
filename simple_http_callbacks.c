@@ -25,7 +25,7 @@ err:
 int register_callback(http_cbs_t *cbs, int method, char *abs_path, int alen, 
     int (*callback)(http_t *req, http_t *resp))
 {
-  fstart("cbs: %p, abs_path: %s, alen: %d, callback: %p", cbs, abs_path, alen, callback);
+  fstart("cbs: %p, method: %d, abs_path: %s, alen: %d, callback: %p", cbs, method, abs_path, alen, callback);
 
   http_cb_t *cb;
   cb = (http_cb_t *)malloc(sizeof(http_cb_t));
@@ -55,7 +55,7 @@ err:
 
 http_cb_t *retrieve_callback(http_cbs_t *cbs, int method, char *abs_path, int alen)
 {
-  fstart("cbs: %p, abs_path: %s, alen: %d", cbs, abs_path, alen);
+  fstart("cbs: %p, method: %d, abs_path: %s, alen: %d", cbs, method, abs_path, alen);
 
   http_cb_t *ret, *curr;
   ret = NULL;
@@ -63,6 +63,10 @@ http_cb_t *retrieve_callback(http_cbs_t *cbs, int method, char *abs_path, int al
 
   while (curr)
   {
+    dmsg("method: %d, curr->method: %d", method, curr->method);
+    dmsg("alen: %d, curr->alen: %d", alen, curr->alen);
+    dmsg("abs_path: %s, curr->abs_path: %s", abs_path, curr->abs_path);
+
     if ((method & curr->method) 
         && alen == curr->alen 
         && !strncmp(abs_path, curr->abs_path, alen))
@@ -93,7 +97,7 @@ int process_request(http_cbs_t *cbs, http_t *req, http_t *resp)
 
   http_cb_t *cb;
   int ret;
-  cb = retrieve_callback(cbs, req->type, req->abs_path, req->alen);
+  cb = retrieve_callback(cbs, req->method, req->abs_path, req->alen);
   if (!cb)
   {
     if (access(req->abs_path + 1, F_OK) != -1)
@@ -108,6 +112,9 @@ int process_request(http_cbs_t *cbs, http_t *req, http_t *resp)
   }
   else
   {
+    resp->version = req->version;
+    resp->method = req->method;
+    resp->code = HTTP_STATUS_CODE_200;
     ret = cb->callback(req, resp);
     if (ret != HTTP_SUCCESS) goto err;
   }
@@ -118,4 +125,23 @@ int process_request(http_cbs_t *cbs, http_t *req, http_t *resp)
 err:
   ferr();
   return HTTP_FAILURE;
+}
+
+void print_callbacks(http_cbs_t *cbs)
+{
+  fstart("cbs: %p", cbs);
+
+  http_cb_t *curr;
+  curr = cbs->head;
+
+  while (curr)
+  {
+    dmsg("Method: %d", curr->method);
+    dmsg("Absolute Path (%d bytes): %s", curr->alen, curr->abs_path);
+    dmsg("Callback Function: %p", curr->callback);
+
+    curr = curr->next;
+  }
+
+  ffinish();
 }

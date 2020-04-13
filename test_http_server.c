@@ -66,7 +66,16 @@ int main(int argc, char *argv[])
     goto err;
   }
 
-  ssl = SSL_new(ctx);
+  cbs = init_http_callbacks();
+  if (!cbs) goto err;
+
+  ret = register_callback(cbs, HTTP_METHOD_GET, "/", 1, process_index);
+  if (ret != HTTP_SUCCESS) goto err;
+
+  ret = register_callback(cbs, HTTP_METHOD_GET, "/test", 5, process_test);
+  if (ret != HTTP_SUCCESS) goto err;
+
+  print_callbacks(cbs);
 
   server = open_listener(port, 1);
   if (server < 0)
@@ -81,17 +90,9 @@ int main(int argc, char *argv[])
     }
   }
 
+  ssl = SSL_new(ctx);
   SSL_set_fd(ssl, client);
   SSL_set_accept_state(ssl);
-
-  cbs = init_http_callbacks();
-  if (!cbs) goto err;
-
-  ret = register_callback(cbs, HTTP_METHOD_GET, "/", 1, process_index);
-  if (ret != HTTP_SUCCESS) goto err;
-
-  ret = register_callback(cbs, HTTP_METHOD_GET, "/test", 5, process_test);
-  if (ret != HTTP_SUCCESS) goto err;
 
   req = init_http_message(HTTP_TYPE_REQUEST);
   if (!req) goto err;
