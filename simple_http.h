@@ -4,13 +4,16 @@
 #include <inttypes.h>
 #include <string.h>
 #include "http_status.h"
+#include "buf.h"
 
 #define BUF_LEN               256
+#define BUF_SIZE              16384
 #define INDEX_FILE            "/index.html"
 #define INDEX_FILE_LEN        12
 
 #define CRLF                  "\r\n"
 #define CRLF_LEN              2
+#define IS_CRLF(p)            (p[0] == '\r' && p[1] == '\n')
 #define ADD_CRLF(buf)         add_buf_char(buf, '\r'); add_buf_char(buf, '\n');
 #define ADD_COLON(buf)        add_buf_char(buf, ':'); add_buf_char(buf, ' ');
 
@@ -18,6 +21,7 @@
 #define DOMAIN_DELIMITER_LEN  2
 
 #define HTTP_SUCCESS          1
+#define HTTP_NOT_FINISHED     0
 #define HTTP_FAILURE          -1
 
 #define HTTP_VERSION_NONE     0
@@ -34,6 +38,9 @@
 #define HTTP_TYPE_REQUEST     0
 #define HTTP_TYPE_RESPONSE    1
 
+#define HTTP_RESOURCE_MEM     0
+#define HTTP_RESOURCE_FILE    1
+
 typedef struct attribute_st {
   char *key;
   int klen;
@@ -42,11 +49,20 @@ typedef struct attribute_st {
   struct attribute_st *next;
 } attribute_t;
 
+typedef struct resource_st {
+  int type;
+  int size;
+  int offset;
+} resource_t;
+
 typedef struct http_st {
   int type;
   int version;
   int method;
   int code;
+  int header;
+  int body;
+  int chunked;
 
   char *host;
   int hlen;
@@ -56,9 +72,10 @@ typedef struct http_st {
   int num_of_attr;
   attribute_t *hdr;
   
-  uint8_t *data;
-  int dlen;
+  resource_t *resource;
 } http_t;
+
+void init_http_module(void);
 
 attribute_t *init_attribute(char *key, int klen, char *value, int vlen);
 void free_attribute(attribute_t *attr);
@@ -77,9 +94,10 @@ int add_header_attribute(http_t *http, char *key, int klen, char *value, int vle
 void del_header_attribute(http_t *http, char *key, int klen);
 void print_header(http_t *http);
 
-uint8_t *http_get_data(http_t *http, int *dlen);
+resource_t *http_get_resource(http_t *http);
+void http_update_resource(http_t *http, int sent);
 
-int http_serialize(http_t *http, uint8_t *hdr, int *hlen, uint8_t *data, int *dlen);
-int http_deserialize(uint8_t *buf, int len, http_t *http);
+int http_serialize(http_t *http, uint8_t *msg, int max, int *mlen);
+int http_deserialize(uint8_t *buf, int len, http_t *http, FILE *fp);
 
 #endif /* __SIMPLE_HTTP_H__ */

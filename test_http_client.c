@@ -1,11 +1,9 @@
 #include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <errno.h>
 
 #include "debug.h"
-#include "simple_http.h"
-#include "simple_network.h"
-
-#define BUF_SIZE  16384
+#include "simple_https.h"
 
 int process_error(SSL *ssl, int ret);
 
@@ -16,16 +14,17 @@ int main(int argc, char *argv[])
   SSL_METHOD *method;
   SSL *ssl;
 
-  int sock, err, port, reqhlen, reqdlen, resplen, ret, dlen;
-  uint8_t reqhdr[BUF_SIZE] = {0, };
-  uint8_t reqdata[BUF_SIZE] = {0, };
-  uint8_t respbuf[BUF_SIZE] = {0, };
-  uint8_t *data;
+  int sock, err, port, ret;
   char *key, *value;
-  const char *domain = "www.google.com";
+  const char *domain = "www.cloudflare.com";
+  const uint8_t http1_1[] = {0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+  FILE *fp;
   port = 443;
+  err = 0;
 
+  fp = fopen("index.html", "w");
   SSL_load_error_strings();
+  init_http_module();
 
   req = init_http_message(HTTP_TYPE_REQUEST);
   if (!req) goto err;
@@ -41,13 +40,13 @@ int main(int argc, char *argv[])
 
   print_header(req);
 
-  key = "Accept-Language";
   del_header_attribute(req, key, (int) strlen(key));
 
   print_header(req);
 
   method = (SSL_METHOD *)TLS_client_method();
   ctx = SSL_CTX_new(method);
+  SSL_CTX_set_alpn_protos(ctx, http1_1, sizeof(http1_1));
   ssl = SSL_new(ctx);
 
   sock = open_connection(domain, port, 1);
@@ -64,48 +63,23 @@ int main(int argc, char *argv[])
     if (err < 0)
       abort();
   }
-  dmsg("TLS session is established");
+  dmsg("TLS session is established with %s", SSL_get_cipher(ssl));
 
-  ret = http_serialize(req, reqbuf, BUF_SIZE, &reqlen);
-  if (ret < 0) goto err;
+  ret = HTTP_NOT_FINISHED;
+  while (ret == HTTP_NOT_FINISHED)
+    ret = send_https_message(ssl, req);
 
-  ret = send_tls_message(ssl, reqhdr, reqhlen);
-  if (ret != reqhlen) 
-  {
-    emsg("ret != reqhlen: ret: %d, reqhlen: %d", ret, reqhlen);
-    goto err;
-  }
-
-  if (reqdlen > 0)
-  {
-    ret = send_tls_message(ssl, reqdata, reqdlen);
-    if (ret != reqdlen)
-    {
-      emsg("ret != reqdlen: ret: %d, reqdlen: %d", ret, reqdlen);
-      goto err;
-    }
-  }
-
-  resplen = recv_tls_message(ssl, respbuf, BUF_SIZE);
+  if (ret != HTTP_SUCCESS) goto err;
 
   resp = init_http_message(HTTP_TYPE_RESPONSE);
   if (!resp) goto err;
-  ret = http_deserialize(respbuf, resplen, resp);
-  if (ret < 0) goto err;
+
+  ret = HTTP_NOT_FINISHED;
+  while (ret == HTTP_NOT_FINISHED)
+    ret = recv_https_message(ssl, resp, fp);
+  if (ret != HTTP_SUCCESS) goto err;
 
   print_header(resp);
-  data = http_get_data(resp, &dlen);
-  
-  //imsg("Received data (%d bytes):\n%s", dlen, data);
-  fprintf(stdout, "%s", data);
-  memset(respbuf, 0x0, BUF_SIZE);
-
-  while (resplen > 0)
-  {
-    resplen = recv_tls_message(ssl, respbuf, BUF_SIZE);
-    fprintf(stdout, "%s", respbuf);
-    memset(respbuf, 0x0, BUF_SIZE);
-  }
 
   if (ssl)
     SSL_free(ssl);

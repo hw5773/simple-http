@@ -1,4 +1,5 @@
 #include "buf.h"
+#include <string.h>
 
 buf_t *init_alloc_buf_mem(buf_t **buf, int len)
 {
@@ -20,7 +21,7 @@ buf_t *init_alloc_buf_mem(buf_t **buf, int len)
     goto err;
   }
   memset((*buf)->data, 0x0, len + 1);
-  (*buf)->len = 0;
+  (*buf)->offset = 0;
   (*buf)->max = len;
 
   ffinish();
@@ -39,54 +40,97 @@ err:
   return NULL;
 }
 
-buf_t *init_memcpy_buf_mem(buf_t **buf, uint8_t *data, int len)
+buf_t *init_memcpy_buf_mem(buf_t *buf, uint8_t *data, int len)
 {
   fstart("buf: %p, data: %p, len: %d", buf, data, len);
   assert(buf != NULL);
   assert(len > 0);
 
-  (*buf) = (buf_t *)malloc(sizeof(buf_t));
-  if (!(*buf))
-    goto err;
-  memset((*buf), 0x0, sizeof(struct buf_st));
-  (*buf)->data = (uint8_t *)malloc(len + 1);
-  if (!(*buf)->data)
-    goto err;
-  memset((*buf)->data, 0x0, len + 1);
-  memcpy((*buf)->data, data, len);
-  (*buf)->len = len;
-  (*buf)->max = len;
+  buf_t *ret;
+  int internal;
+  ret = NULL;
+  internal = 0;
 
-  ffinish("buf: %p", buf);
-  return (*buf);
+  if (!buf)
+  {
+    ret = (buf_t *)malloc(sizeof(buf_t));
+    if (!ret) 
+    {
+      emsg("Out of memory");
+      goto err;
+    }
+    internal = 1;
+    memset(ret, 0x0, sizeof(buf_t));
+  }
+  else
+    ret = buf;
+
+  if (ret->data)
+    free(ret->data);
+
+  ret->data = (uint8_t *)malloc(len + 1);
+  if (!ret->data) 
+  {
+    emsg("Out of memory");
+    goto err;
+  }
+  memcpy(ret->data, data, len);
+  ret->data[len] = 0;
+  ret->offset = 0;
+  ret->max = len;
+
+  ffinish("ret: %p", ret);
+  return ret;
 
 err:
-  if (*buf)
+  if (ret)
   {
-    if ((*buf)->data)
-      free((*buf)->data);
+    if (ret->data)
+      free(ret->data);
 
-    free(*buf);
+    if (internal)
+      free(ret);
   }
 
   ferr();
   return NULL;
 }
 
-buf_t *init_buf_mem(buf_t **buf, uint8_t *data, int len)
+buf_t *init_buf_mem(buf_t *buf, uint8_t *data, int len)
 {
   fstart("buf: %p, data: %p, len: %d", buf, data, len);
-  (*buf) = (struct buf_st *)malloc(sizeof(struct buf_st));
-  if (!(*buf))
-    goto err;
-  (*buf)->data = data;
-  (*buf)->len = len;
-  (*buf)->max = len;
+  
+  buf_t *ret;
+  int internal;
 
-  ffinish("buf: %p", buf);
-  return (*buf);
+  ret = NULL;
+  internal = 0;
+
+  if (!buf)
+  {
+    ret = (buf_t *)malloc(sizeof(buf_t));
+    if (!ret)
+    {
+      emsg("Out of memory");
+      goto err;
+    }
+    memset(ret, 0x0, sizeof(buf_t));
+    internal = 1;
+  }
+  else
+    ret = buf;
+
+  ret->data = data;
+  ret->offset = 0;
+  ret->max = len;
+
+  ffinish("ret: %p", ret);
+  return ret;
 
 err:
+  if (ret && internal)
+    free(ret);
+
   ferr();
   return NULL;
 }
@@ -99,16 +143,16 @@ int update_buf_mem(buf_t *buf, uint8_t *data, int len)
 
   int ret;
 
-  if (buf->len + len <= buf->max)
+  if (buf->offset + len <= buf->max)
   {
-    memcpy(buf->data + buf->len, data, len);
-    buf->len += len;
+    memcpy(buf->data + buf->offset, data, len);
+    buf->offset += len;
     ret = len;
   }
   else
   {
     emsg("Out of memory");
-    ret = -1
+    ret = -1;
   }
 
   return ret;
@@ -120,10 +164,10 @@ int add_buf_char(buf_t *buf, uint8_t ch)
 
   int ret;
 
-  if (buf->len + 1 <= buf->max)
+  if (buf->offset + 1 <= buf->max)
   {
-    *(buf->data + buf->len) = ch;
-    buf->len += 1;
+    *(buf->data + buf->offset) = ch;
+    buf->offset += 1;
     ret = 1;
   }
   else
@@ -137,7 +181,7 @@ int add_buf_char(buf_t *buf, uint8_t ch)
 
 int get_buf_remaining(buf_t *buf)
 {
-  return buf->max - buf->len;
+  return buf->max - buf->offset;
 }
 
 uint8_t *get_buf_data(buf_t *buf)
@@ -164,8 +208,8 @@ uint8_t *get_buf_curr(buf_t *buf)
   uint8_t *ret;
   ret = NULL;
 
-  if (buf && buf->data && buf->len >= 0)
-    ret = buf->data + buf->len;
+  if (buf && buf->data && buf->offset >= 0)
+    ret = buf->data + buf->offset;
   else
   {
     emsg("Error in the buffer");
@@ -180,7 +224,30 @@ err:
   return NULL;
 }
 
-int get_buf_len(buf_t *buf)
+uint8_t *get_buf_end(buf_t *buf)
+{
+  fstart("buf: %p", buf);
+
+  uint8_t *ret;
+  ret = NULL;
+
+  if (buf && buf->data && buf->max >= 0)
+    ret = buf->data + buf->max;
+  else
+  {
+    emsg("Error in the buffer");
+    goto err;
+  }
+
+  ffinish("ret: %p", ret);
+  return ret;
+
+err:
+  ferr();
+  return NULL;
+}
+
+int get_buf_offset(buf_t *buf)
 {
   fstart("buf: %p", (void *)buf);
   assert(buf != NULL);
@@ -189,11 +256,28 @@ int get_buf_len(buf_t *buf)
   if (!buf) goto err;
   if (!buf->data) goto err;
 
-  ffinish("buf->len: %d", buf->len);
-  return buf->len;
+  ffinish("buf->len: %d", buf->offset);
+  return buf->offset;
 
 err:
-  ffinish();
+  ferr();
+  return -1;
+}
+
+int get_buf_total(buf_t *buf)
+{
+  fstart("buf: %p", (void *)buf);
+  assert(buf != NULL);
+  assert(buf->data != NULL);
+
+  if (!buf) goto err;
+  if (!buf->data) goto err;
+
+  ffinish("buf->max: %d", buf->max);
+  return buf->max;
+
+err:
+  ferr();
   return -1;
 }
 
@@ -206,10 +290,54 @@ void free_buf(buf_t *buf)
     {
       free(buf->data);
     }
-    buf->len = 0;
+    buf->offset = 0;
     buf->data = NULL;
     free(buf);
     buf = NULL;
   }
   ffinish();
+}
+
+uint8_t *delete_space(uint8_t *p)
+{
+  fstart("p: %p", p);
+
+  while (*p == ' ')
+    p++;
+
+  ffinish("p: %p", p);
+  return p;
+}
+
+uint8_t *get_next_token(buf_t *buf, char *str, int *len)
+{
+  fstart("buf: %p, ch: %s, len: %p", buf, str, len);
+  assert(buf != NULL);
+  assert(len != NULL);
+
+  uint8_t *ret, *space;
+  ret = get_buf_curr(buf);
+  ret = delete_space(ret);
+  space = (uint8_t *)strstr((const char *)ret, str);
+  dmsg("space: %p, ret: %p", space, ret);
+  
+  if (space - buf->data > buf->max)
+    space = NULL;
+
+  if (!space)
+  {
+    *len = get_buf_remaining(buf);
+  }
+  else if (space > ret)
+  {
+    *len = space - ret;
+    buf->offset += *len + strlen(str);
+  }
+  else
+  {
+    *len = get_buf_remaining(buf);
+  }
+
+  ffinish();
+  return ret;
 }

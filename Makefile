@@ -5,7 +5,7 @@ DEBUG ?= 0
 
 ROOT_DIRECTORY=$(HOME)/devel/rpi/edge-libevent
 BIN=test_http_client test_http_server
-SRCS=simple_http.c simple_network.c
+SRCS=simple_http.c simple_https.c simple_network.c buf.c http_status.c
 OBJS=$(SRCS:.c=.o)
 CLIENT_SRC=test_http_client.c
 CLIENT_OBJ=$(CLIENT_SRC:.c=.o)

@@ -1,7 +1,13 @@
 #include "simple_http.h"
 #include <ctype.h>
 
-static int char_to_int(const char *str, uint32_t slen);
+static int char_to_int(uint8_t *str, uint32_t slen, int base);
+static int int_to_char(int num, uint8_t *str, int base);
+
+void init_http_module(void)
+{
+  init_http_status();
+}
 
 attribute_t *init_attribute(char *key, int klen, char *value, int vlen)
 {
@@ -143,15 +149,15 @@ void http_set_domain(http_t *http, const char *domain, int dlen)
   ffinish();
 }
 
-void http_set_content(http_t *http, const char *content, int clen)
+void http_set_abs_path(http_t *http, const char *abs_path, int alen)
 {
-  fstart("http: %p, content: %s, clen: %d", http, content, clen);
+  fstart("http: %p, abs_path: %s, alen: %d", http, abs_path, alen);
   assert(http != NULL);
-  assert(content != NULL);
-  assert(clen > 0);
+  assert(abs_path != NULL);
+  assert(alen > 0);
 
-  http->content = (char *)content;
-  http->clen = clen;
+  http->abs_path = (char *)abs_path;
+  http->alen = alen;
 
   ffinish();
 }
@@ -167,17 +173,11 @@ void http_set_default_attributes(http_t *http)
   const char *accept_key = "Accept";
   const char *accept_value = "*/*";
 
-  const char *accept_encoding_key = "Accept-Encoding";
-  const char *accept_encoding_value = "identity";
-
   add_header_attribute(http, (char *) user_agent_key, (int) strlen(user_agent_key), 
       (char *) user_agent_value, (int) strlen(user_agent_value));
 
   add_header_attribute(http, (char *) accept_key, (int) strlen(accept_key),
       (char *) accept_value, (int) strlen(accept_value));
-
-  add_header_attribute(http, (char *) accept_encoding_key, (int) strlen(accept_encoding_key),
-      (char *) accept_encoding_value, (int) strlen(accept_encoding_value));
 
   ffinish();
 }
@@ -238,7 +238,7 @@ int add_header_attribute(http_t *http, char *key, int klen, char *value, int vle
   http->num_of_attr += 1;
 
   ffinish();
-  return 1;
+  return HTTP_SUCCESS;
 }
 
 void del_header_attribute(http_t *http, char *key, int klen)
@@ -329,44 +329,51 @@ void print_header(http_t *http)
   ffinish();
 }
 
-uint8_t *http_get_data(http_t *http, int *dlen)
+resource_t *http_get_resource(http_t *http)
 {
-  fstart("http: %p, dlen: %p", http, dlen);
+  fstart("http: %p", http);
   assert(http != NULL);
+
+  if (!http->resource) goto err;
   
-  attribute_t *attr;
-  const char *key = "Transfer-Encoding";
-  const char *chunked = "chunked";
-  int klen;
+  return http->resource;
 
-  klen = (int)strlen(key);
+err:
+  return NULL;
+}
 
-  if (dlen)
-  {
-    attr = find_header_attribute(http, key, klen);
+void http_update_resource(http_t *http, int offset)
+{
+  fstart("http: %p, offset: %d", http, offset);
+  assert(http != NULL);
+  assert(offset >= 0);
 
-    if (attr && attr->vlen == strlen(chunked) && !strncmp(attr->value, chunked, attr->vlen))
-      *dlen = -1;
-    else
-      *dlen = http->dlen;
-  }
+  resource_t *resource;
+  resource = http_get_resource(http);
+  if (resource)
+    resource->offset += offset;
 
-  ffinish("data: %p", http->data);
-  return http->data;
+  ffinish();
 }
 
 int http_make_version(http_t *http, buf_t *msg)
 {
   fstart("http: %p, msg: %p", http, msg);
 
+  const char *http1 = "HTTP/1";
+  const char *http1_1 = "HTTP/1.1";
+  const char *http2 = "HTTP/2";
+
   switch (http->version)
   {
     case HTTP_VERSION_1_0:
-      update_buf_mem(msg, "HTTP/1", 6);
+      update_buf_mem(msg, (uint8_t *)http1, (int)strlen(http1));
       break;
     case HTTP_VERSION_1_1:
-      update_buf_mem(msg, "HTTP/1.1", 8);
+      update_buf_mem(msg, (uint8_t *)http1_1, (int)strlen(http1_1));
       break;
+    case HTTP_VERSION_2:
+      update_buf_mem(msg, (uint8_t *)http2, (int)strlen(http2));
     default:
       emsg("Unsupported Version: %d", http->version);
       goto err;
@@ -399,8 +406,8 @@ int http_make_code_and_reason(http_t *http, buf_t *msg)
   clen = (int) strlen(code);
   rlen = (int) strlen(reason);
 
-  update_buf_mem(msg, code, clen);
-  update_buf_mem(msg, reason, rlen);
+  update_buf_mem(msg, (uint8_t *)code, clen);
+  update_buf_mem(msg, (uint8_t *)reason, rlen);
 
   ffinish();
   return HTTP_SUCCESS;
@@ -417,20 +424,24 @@ int http_make_request_line(http_t *http, buf_t *msg)
   assert(msg != NULL);
 
   int ret;
+  const char *get = "GET ";
+  const char *post = "POST ";
+  const char *put = "PUT ";
+  const char *delete = "DELETE ";
 
   switch (http->method)
   {
     case HTTP_METHOD_GET:
-      ret = update_buf_mem(msg, "GET ", 4);
+      ret = update_buf_mem(msg, (uint8_t *)get, strlen(get));
       break;
     case HTTP_METHOD_POST:
-      ret = update_buf_mem(msg, "POST ", 5);
+      ret = update_buf_mem(msg, (uint8_t *)post, strlen(post));
       break;
     case HTTP_METHOD_PUT:
-      ret = update_buf_mem(msg, "PUT ", 4);
+      ret = update_buf_mem(msg, (uint8_t *)put, strlen(put));
       break;
     case HTTP_METHOD_DELETE:
-      ret = update_buf_mem(msg, "DELETE ", 7);
+      ret = update_buf_mem(msg, (uint8_t *)delete, strlen(delete));
       break;
     default:
       emsg("Unsupported Method");
@@ -440,19 +451,19 @@ int http_make_request_line(http_t *http, buf_t *msg)
   if (ret < 0) goto err;
 
   if (http->abs_path && http->alen > 0)
-    ret = update_buf_mem(msg, http->abs_path, http->alen);
+    ret = update_buf_mem(msg, (uint8_t *)http->abs_path, http->alen);
   else
-    ret = update_buf_mem(msg, "/ ", 2);
+    ret = update_buf_mem(msg, (uint8_t *)"/ ", 2);
 
   ret = http_make_version(http, msg);
-  if (ret == HTTP_FAILURE) goto err;
+  if (ret != HTTP_SUCCESS) goto err;
 
   ADD_CRLF(msg);
 
-  ret = update_buf_mem(msg, "Host: ", 6);
+  ret = update_buf_mem(msg, (uint8_t *)"Host: ", 6);
   if (ret < 0) goto err;
 
-  ret = update_buf_mem(msg, http->host, http->hlen);
+  ret = update_buf_mem(msg, (uint8_t *)http->host, http->hlen);
   if (ret < 0) goto err;
 
   ADD_CRLF(msg);
@@ -474,13 +485,13 @@ int http_make_status_line(http_t *http, buf_t *msg)
   int ret;
 
   ret = http_make_version(http, msg);
-  if (ret < 0) goto err;
+  if (ret != HTTP_SUCCESS) goto err;
   
   ret = add_buf_char(msg, ' ');
   if (ret < 0) goto err;
 
   ret = http_make_code_and_reason(http, msg);
-  if (ret < 0) goto err;
+  if (ret != HTTP_SUCCESS) goto err;
 
   ADD_CRLF(msg);
 
@@ -497,18 +508,22 @@ int http_make_message_header(http_t *http, buf_t *msg)
   fstart("http: %p, msg: %p", http, msg);
 
   attribute_t *attr;
+  int ret;
 
+  ret = HTTP_SUCCESS;
   attr = http->hdr;
 
   while (attr)
   {
-    ret = update_buf_mem(msg, attr->key, attr->klen);
+    ret = update_buf_mem(msg, (uint8_t *)attr->key, attr->klen);
     if (ret < 0) goto err;
-    COLON(msg);
+    ADD_COLON(msg);
 
-    ret = update_buf_mem(msg, attr->value, attr->vlen);
+    ret = update_buf_mem(msg, (uint8_t *)attr->value, attr->vlen);
     if (ret < 0) goto err;
     ADD_CRLF(msg);
+
+    attr = attr->next;
   }
 
   ADD_CRLF(msg);
@@ -526,13 +541,17 @@ int http_make_message_body(http_t *http, buf_t *msg)
   fstart("http: %p, msg: %p", http, msg);
 
   int ret;
+  resource_t *resource;
+
+  ret = HTTP_SUCCESS;
+  resource = http_get_resource(http);
+
+  if (resource)
+  {
+  }
 
   ffinish();
-  return HTTP_SUCCESS;
-
-err:
-  ferr();
-  return HTTP_FAILURE;
+  return ret;
 }
 
 int http_serialize(http_t *http, uint8_t *msg, int max, int *mlen)
@@ -548,20 +567,235 @@ int http_serialize(http_t *http, uint8_t *msg, int max, int *mlen)
 
   init_alloc_buf_mem(&buf, max);
 
-  if (http->type == HTTP_TYPE_REQUEST)
-    ret = http_make_request_line(http, buf);
-  else if (http->type == HTTP_TYPE_RESPONSE)
-    ret = http_make_status_line(http, buf);
-  if (ret < 0) goto err;
+  if (!http->header)
+  {
+    if (http->type == HTTP_TYPE_REQUEST)
+      ret = http_make_request_line(http, buf);
+    else if (http->type == HTTP_TYPE_RESPONSE)
+      ret = http_make_status_line(http, buf);
+    if (ret != HTTP_SUCCESS) goto err;
 
-  ret = http_make_message_header(http, buf);
-  if (ret < 0) goto err;
+    ret = http_make_message_header(http, buf);
+    if (ret != HTTP_SUCCESS) goto err;
+
+    http->header = 1;
+  }
 
   ret = http_make_message_body(http, buf);
-  if (ret < 0) goto err;
 
-  *mlen = get_buf_len(buf);
+  *mlen = get_buf_offset(buf);
   memcpy(msg, get_buf_data(buf), *mlen);
+
+  ffinish();
+  return ret;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_parse_version(http_t *http, uint8_t *p, int len)
+{
+  fstart("http: %p, p: %p, len: %d", http, p, len);
+
+  const char *http1 = "HTTP/1";
+  const char *http1_1 = "HTTP/1.1";
+  const char *http2 = "HTTP/2";
+
+  if (len == 6 && !strncmp((const char *)p, http1, strlen(http1)))
+    http->version = HTTP_VERSION_1_0;
+  else if (len == 8 && !strncmp((const char *)p, http1_1, strlen(http1_1)))
+    http->version = HTTP_VERSION_1_1;
+  else if (len == 6 && !strncmp((const char *)p, http2, strlen(http2)))
+    http->version = HTTP_VERSION_2;
+  else
+    http->version = HTTP_VERSION_NONE;
+
+  ffinish();
+  return HTTP_SUCCESS;
+}
+
+int http_parse_status_code(http_t *http, uint8_t *p, int len)
+{
+  fstart("http: %p, p: %p, len: %d", http, p, len);
+
+  int status_code;
+  status_code = char_to_int(p, 3, 10);
+
+  switch (status_code)
+  {
+    case 100:
+      http->code = HTTP_STATUS_CODE_100;
+      break;
+    case 101:
+      http->code = HTTP_STATUS_CODE_101;
+      break;
+    case 200:
+      http->code = HTTP_STATUS_CODE_200;
+      break;
+    case 201:
+      http->code = HTTP_STATUS_CODE_201;
+      break;
+    case 202:
+      http->code = HTTP_STATUS_CODE_202;
+      break;
+    case 203:
+      http->code = HTTP_STATUS_CODE_203;
+      break;
+    case 204:
+      http->code = HTTP_STATUS_CODE_204;
+      break;
+    case 205:
+      http->code = HTTP_STATUS_CODE_205;
+      break;
+    case 206:
+      http->code = HTTP_STATUS_CODE_206;
+      break;
+    case 300:
+      http->code = HTTP_STATUS_CODE_300;
+      break;
+    case 301:
+      http->code = HTTP_STATUS_CODE_301;
+      break;
+    case 302:
+      http->code = HTTP_STATUS_CODE_302;
+      break;
+    case 303:
+      http->code = HTTP_STATUS_CODE_303;
+      break;
+    case 304:
+      http->code = HTTP_STATUS_CODE_304;
+      break;
+    case 305:
+      http->code = HTTP_STATUS_CODE_305;
+      break;
+    case 307:
+      http->code = HTTP_STATUS_CODE_307;
+      break;
+    case 400:
+      http->code = HTTP_STATUS_CODE_400;
+      break;
+    case 401:
+      http->code = HTTP_STATUS_CODE_401;
+      break;
+    case 402:
+      http->code = HTTP_STATUS_CODE_402;
+      break;
+    case 403:
+      http->code = HTTP_STATUS_CODE_403;
+      break;
+    case 404:
+      http->code = HTTP_STATUS_CODE_404;
+      break;
+    case 405:
+      http->code = HTTP_STATUS_CODE_405;
+      break;
+    case 406:
+      http->code = HTTP_STATUS_CODE_406;
+      break;
+    case 407:
+      http->code = HTTP_STATUS_CODE_407;
+      break;
+    case 408:
+      http->code = HTTP_STATUS_CODE_408;
+      break;
+    case 409:
+      http->code = HTTP_STATUS_CODE_409;
+      break;
+    case 410:
+      http->code = HTTP_STATUS_CODE_410;
+      break;
+    case 411:
+      http->code = HTTP_STATUS_CODE_411;
+      break;
+    case 412:
+      http->code = HTTP_STATUS_CODE_412;
+      break;
+    case 413:
+      http->code = HTTP_STATUS_CODE_413;
+      break;
+    case 414:
+      http->code = HTTP_STATUS_CODE_414;
+      break;
+    case 415:
+      http->code = HTTP_STATUS_CODE_415;
+      break;
+    case 416:
+      http->code = HTTP_STATUS_CODE_416;
+      break;
+    case 417:
+      http->code = HTTP_STATUS_CODE_417;
+      break;
+    case 500:
+      http->code = HTTP_STATUS_CODE_500;
+      break;
+    case 501:
+      http->code = HTTP_STATUS_CODE_501;
+      break;
+    case 502:
+      http->code = HTTP_STATUS_CODE_502;
+      break;
+    case 503:
+      http->code = HTTP_STATUS_CODE_503;
+      break;
+    case 504:
+      http->code = HTTP_STATUS_CODE_504;
+      break;
+    case 505:
+      http->code = HTTP_STATUS_CODE_505;
+      break;
+    default:
+      http->code = HTTP_STATUS_CODE_NONE;
+  }
+
+  ffinish();
+  return HTTP_SUCCESS;
+}
+
+int http_parse_request_line(http_t *http, buf_t *line)
+{
+  fstart("http: %p, line: %p", http, line);
+
+  uint8_t *p;
+  int len;
+  const char *get = "GET";
+  const char *post = "POST";
+  const char *put = "PUT";
+  const char *delete = "DELETE";
+
+  // Method
+  p = get_next_token(line, " ", &len);
+  if (!p) goto err;
+
+  if (len == 3 && !strncmp((const char *)p, get, len))
+    http->method = HTTP_METHOD_GET;
+  else if (len == 4 && !strncmp((const char *)p, post, len))
+    http->method = HTTP_METHOD_POST;
+  else if (len == 3 && !strncmp((const char *)p, put, len))
+    http->method = HTTP_METHOD_PUT;
+  else if (len == 6 && !strncmp((const char *)p, delete, len))
+    http->method = HTTP_METHOD_DELETE;
+  else
+    http->method = HTTP_METHOD_NONE;
+
+  // Request-URI
+  p = get_next_token(line, " ", &len);
+  http->abs_path = (char *)malloc(len + 1);
+  memcpy(http->abs_path, p, len);
+  http->abs_path[len] = 0;
+  http->alen = len;
+
+  // HTTP-Version
+  p = get_next_token(line, " ", &len);
+  http_parse_version(http, p, len);
+
+  // CRLF
+  p = get_next_token(line, " ", &len);
+  if (len != 2 || !IS_CRLF(p))
+  {
+    emsg("Parse the request line error");
+    goto err;
+  }
 
   ffinish();
   return HTTP_SUCCESS;
@@ -571,200 +805,347 @@ err:
   return HTTP_FAILURE;
 }
 
-int http_parse_message_header(http_t *http, const char *p, int l)
+int http_parse_status_line(http_t *http, buf_t *line)
 {
-  fstart("http: %p, p: %p, l: %d", http, p, l);
-  dmsg("p: %s", p);
-  if (l <= 0) goto err;
+  fstart("http: %p, line: %p", http, line);
 
-  const char *key, *value, *end, *q;
+  uint8_t *p;
+  int len;
+
+  // HTTP-Version
+  p = get_next_token(line, " ", &len);
+  if (!p) goto err;
+  http_parse_version(http, p, len);
+
+  // Status-Code
+  p = get_next_token(line, " ", &len);
+  if (!p) goto err;
+  http_parse_status_code(http, p, len);
+
+  // Reason-Phrase (Do nothing)
+  p = get_next_token(line, " ", &len);
+  if (!p) goto err;
+
+  ffinish();
+  return HTTP_SUCCESS;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_parse_start_line(http_t *http, buf_t *line)
+{
+  fstart("http: %p, line: %p", http, line);
+
+  uint8_t *p;
+  int ret;
+  p = get_buf_curr(line);
+
+  if (p[0] == 'H' && p[1] == 'T' && p[2] == 'T' && p[3] == 'P')
+  {
+    http->type = HTTP_TYPE_RESPONSE;
+    ret = http_parse_status_line(http, line);
+  }
+  else
+  {
+    http->type = HTTP_TYPE_REQUEST;
+    ret = http_parse_request_line(http, line);
+  }
+
+  if (ret != HTTP_SUCCESS) goto err;
+
+  ffinish();
+  return HTTP_SUCCESS;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_parse_message_header(http_t *http, buf_t *line)
+{
+  fstart("http: %p, line: %p", http, line);
+
+  char *key, *value, *end, *p;
   int klen, vlen;
 
-  end = p + l;
-  while (*p == ' ')
-    p++;
+  end = (char *)get_buf_end(line);
+  if (!end) goto err;
 
+  p = (char *)get_buf_curr(line);
+  dmsg("p: %s", p);
   value = strchr(p, ':');
-  if (!value || (value - p > l))
+  key = p;
+  klen = value - key;
+  value = value + 1;
+  value = (char *)delete_space((uint8_t *)value);
+  vlen = end - value;
+
+  if (!strncmp(key, "Host:", 5))
   {
-    if (!strncmp(p, "GET", 3))
+    dmsg("Host:\n%s", p);
+    p += 5;
+    p = (char *)delete_space((uint8_t *)p);
+
+    if (line->data + line->max - (uint8_t *)p > 0)
     {
-      http->type = HTTP_TYPE_REQUEST;
-      http->method = HTTP_METHOD_GET;
-
-      while (*p != '/')
-        p++;
-
-      q = p;
-
-      while (*q != ' ')
-        q++;
-
-      if (q - p == 1)
-      {
-        http->content = INDEX_FILE;
-        http->clen = INDEX_FILE_LEN;
-      }
-      else if (q - p > 1)
-      {
-        http->content = (char *)malloc(q - p);
-        if (!http->content) goto err;
-        memset(http->content, 0x0, q - p);
-        memcpy(http->content, p + 1, q - p - 1);
-        http->clen = q - p - 1;
-        dmsg("Content (%d bytes): %s", http->clen, http->content);
-      }
-      else
-      {
-        emsg("Error in parsing the content name");
-        goto err;
-      }
+      http->hlen = end - p;
+      http->host = (char *)malloc(http->hlen + 1);
+      if (!http->host) goto err;
+      memcpy(http->host, p, end - p);
+      http->host[http->hlen] = 0;
     }
-    else if (!strncmp(p, "HTTP", 4))
+    else
     {
-      http->type = HTTP_TYPE_RESPONSE;
-      http->method = HTTP_METHOD_NONE;
-      p += 4;
-
-      if (*p == '/')
-      {
-        p += 1;
-        if (*p == '1' && *(p+1) == ' ')
-        {
-          http->version = HTTP_VERSION_1_0;
-          p += 1;
-        }
-        else if (*p == '1' && *(p+1) == '.' && *(p+2) == '1')
-        {
-          http->version = HTTP_VERSION_1_1;
-          p += 3;
-        }
-        else if (*p == '2')
-        {
-          http->version = HTTP_VERSION_2;
-          p += 1;
-        }
-      }
-      while (*p == ' ')
-        p++;
-      q = p;
-      p = strchr(q, ' ');
-      http->code = char_to_int(q, p - q);
+      emsg("Error in parsing the domain name");
+      goto err;
     }
   }
   else
   {
-    key = p;
-    klen = value - key;
-    value = value + 1;
-    while (*value == ' ')
-      value++;
-    vlen = l - (value - key);
+    add_header_attribute(http, key, klen, value, vlen);
 
-    if (!strncmp(key, "Host:", 5))
-    {
-      dmsg("Host:\n%s", p);
-      p += 5;
-
-      dmsg("p: %p", p);
-      while (*p == ' ')
-        p++;
-
-      if (end - p > 0)
-      {
-        http->host = (char *)malloc(end - p + 1);
-        if (!http->host) goto err;
-        memset(http->host, 0x0, end - p + 1);
-        memcpy(http->host, p, end - p);
-        http->hlen = end - p;
-      }
-      else
-      {
-        emsg("Error in parsing the domain name");
-        goto err;
-      }
-    }
-    else if ((l > 0) && !strncmp((const char *)p, "Content-Length:", 15))
-    {
-      while (*p == ' ')
-        p++;
-      http->dlen = char_to_int(p, end - p);
-    }
-    else
-    {
-      add_header_attribute(http, key, klen, value, vlen);
-
-      attribute_t *attr;
-      attr = find_header_attribute(http, key, klen);
-      dmsg("key (%d bytes): %s", attr->klen, attr->key);
-      dmsg("value (%d bytes): %s", attr->vlen, attr->value);
-    }
+    attribute_t *attr;
+    attr = find_header_attribute(http, key, klen);
+    dmsg("key (%d bytes): %s", attr->klen, attr->key);
+    dmsg("value (%d bytes): %s", attr->vlen, attr->value);
   }
 
   ffinish();
-  return 1;
+  return HTTP_SUCCESS;
 
 err:
   ferr();
-  return -1;
+  return HTTP_FAILURE;
 }
 
-int http_deserialize(uint8_t *buf, int len, http_t *http)
+int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
+{
+  fstart("http: %p, buf: %p", http, buf);
+  assert(http != NULL);
+  assert(buf != NULL);
+
+  attribute_t *attr;
+  resource_t *resource;
+  const char *key1, *key2, *key3, *chunked, *p;
+  uint8_t tmp[10] = {0, };
+  uint8_t tbuf[BUF_SIZE] = {0, };
+  int len, clen, tlen, vlen, next;
+  key1 = "Transfer-Encoding";
+  key2 = "Content-Length";
+  key3 = "Content-length";
+  chunked = "chunked";
+  len = 0;
+  clen = 0;
+  next = 0;
+
+  resource = http_get_resource(http);
+  if (!http->body)
+  {
+    attr = find_header_attribute(http, (char *)key1, strlen(key1));
+    if (attr)
+      if (!strncmp(attr->value, chunked, attr->vlen))
+        http->chunked = 1;
+
+    if (!http->chunked)
+    {
+      attr = find_header_attribute(http, (char *)key2, strlen(key2));
+
+      dmsg("Content-Length attribute: %p", attr);
+      if (attr)
+      {
+        clen = char_to_int((uint8_t *)attr->value, attr->vlen, 10);
+        dmsg("Content-Length: %d", clen);
+        if (clen == 0) goto out;
+      }
+      else
+      {
+        attr = find_header_attribute(http, (char *)key3, strlen(key3));
+        dmsg("Content-Length attribute: %p", attr);
+        if (attr)
+        {
+          clen = char_to_int((uint8_t *)attr->value, attr->vlen, 10);
+          dmsg("Content-Length: %d", clen);
+          if (clen == 0) goto out;
+        }
+      }
+    }
+
+    dmsg("http->chunked is set to %d", http->chunked);
+
+    if (clen > 0 || http->chunked)
+    {
+      dmsg("resource: %p", resource);
+      if (!resource)
+      {
+        http->resource = (resource_t *)malloc(sizeof(resource_t));
+        memset(http->resource, 0x0, sizeof(resource_t));
+        resource = http_get_resource(http);
+        resource->type = HTTP_RESOURCE_FILE;
+      }
+
+      if (http->chunked)
+        resource->size = 0;
+      else if (clen > 0)
+        resource->size = clen;
+      resource->offset = 0;
+    }
+
+    http->body = 1;
+  }
+
+  // Transfer-Encoding: chunked
+  if (http->chunked)
+  {
+    if (resource->offset < resource->size)
+    {
+      p = (const char *)get_next_token(buf, CRLF, &tlen);
+      len = get_buf_remaining(buf);
+      if (tlen < len)
+      {
+        dmsg("\n\ntlen is different from len");
+        memcpy(tbuf, p, tlen);
+        fprintf(fp, "%s", tbuf);
+        printf(">>>>> (%d bytes)\n%s\n>>>>>\n", tlen, tbuf);
+      }
+      else
+      {
+        dmsg("\n\ntlen is same with len");
+        fprintf(fp, "%s", p);
+        printf(">>>>> (%d bytes)\n%s\n>>>>>\n", tlen, p);
+      }
+      resource->offset += tlen;
+      dmsg("resource->offset become: %d", resource->offset);
+    }
+
+    if (resource->offset >= resource->size)
+    {
+      next = 1;
+    }
+
+    if (next)
+    {
+      p = (const char *)get_next_token(buf, CRLF, &tlen);
+      
+      clen = char_to_int((uint8_t *)p, tlen, 16);
+      dmsg("Chunk length: %d bytes", clen);
+
+      if (tlen > 0 && !clen)
+      {
+        vlen = int_to_char(resource->size, tmp, 10);
+        dmsg("vlen: %d", vlen);
+        add_header_attribute(http, (char *)key1, (int) strlen(key1), (char *)tmp, vlen);
+        goto out;
+      }
+
+      if (clen > 0)
+      {
+        resource->size += clen;
+        p = (const char *)get_next_token(buf, CRLF, &tlen);
+        resource->offset += tlen;
+        dmsg("resource->offset: %d / resource->size: %d", tlen, clen);
+        fprintf(fp, "%s", p);
+      }
+    }
+  }
+  else
+  {
+    if (resource->offset < resource->size)
+    {
+      p = (const char *)get_buf_curr(buf);
+      len = get_buf_remaining(buf);
+      fprintf(fp, "%s", p);
+      resource->offset += len;
+    }
+    else
+      goto out;
+  }
+
+  ffinish();
+  return HTTP_NOT_FINISHED;
+
+out:
+  ffinish();
+  return HTTP_SUCCESS;
+}
+
+int http_deserialize(uint8_t *buf, int len, http_t *http, FILE *fp)
 {
   fstart("buf: %p, len: %d, http: %p", buf, len, http);
   assert(buf != NULL);
   assert(len > 0);
   assert(http != NULL);
 
-  const char *cptr, *nptr, *p, *start;
-  int start_line;
+  const char *cptr, *nptr, *p;
+  int start_line, hlen, l, ret;
+  buf_t *line;
 #ifdef DEBUG
-  int l;
   uint8_t debug[BUF_LEN] = {0, };
 #endif /* DEBUG */
 
-  start = (const char *)buf;
   cptr = (const char *)buf;
-  start_line = 0;
+  start_line = hlen = 0;
+  line = init_alloc_buf_mem(&line, BUF_SIZE);
 
-  while ((nptr = strstr(cptr, CRLF)))
+  if (!http->header)
   {
+    dmsg("inside the parser");
+    dmsg("str: %s", cptr);
+    while ((nptr = strstr(cptr, CRLF)))
+    {
+      l = nptr - cptr;
+      hlen += l;
+      p = cptr;
+      if (l == 0) break;
 #ifdef DEBUG
-    l = nptr - cptr;
-    memcpy(debug, cptr, l);
-    debug[l + 1] = 0;
-    dmsg("Token (%d bytes): %s", l, debug);
+      memcpy(debug, cptr, l);
+      debug[l + 1] = 0;
+      dmsg("Token (%d bytes): %s", l, debug);
 #endif /* DEBUG */
 
-    p = cptr;
+      line = init_buf_mem(line, (uint8_t *)p, l);
 
-    while (*p == ' ')
-      p++;
-
-    if (!start_line)
-      http_parse_start_line(http, p, l);
-    else
-      http_parse_message_header(http, p, l);
-    cptr = nptr + CRLF_LEN;
+      if (!start_line)
+      {
+        ret = http_parse_start_line(http, line);
+        start_line = 1;
+      }
+      else
+        ret = http_parse_message_header(http, line);
+      if (ret != HTTP_SUCCESS) goto err;
+      cptr = nptr + CRLF_LEN;
+      hlen += CRLF_LEN;
+      cptr = (const char *)delete_space((uint8_t *)cptr);
 
 #ifdef DEBUG
-    memset(debug, 0x0, BUF_LEN);
+      memset(debug, 0x0, BUF_LEN);
 #endif /* DEBUG */
+    }
+    http->header = 1;
+    p = p + CRLF_LEN;
+    hlen += CRLF_LEN;
+    line = init_buf_mem(line, (uint8_t *)p, len - hlen);
+  }
+  else
+  {
+    line = init_buf_mem(line, (uint8_t *)cptr, len);
   }
 
-  dmsg("len: %d, p - start: %lu", len, p - start);
-
-  http->data = p;
+  ret = http_parse_message_body(http, line, fp);
+  if (ret == HTTP_FAILURE) goto err;
 
   if (http->hlen > 0)
     dmsg("Domain name in the parser (%d bytes): %s", http->hlen, http->host);
-  if (http->clen > 0)
-    dmsg("Content name in the parser (%d bytes): %s", http->clen, http->content);
-  if (http->dlen > 0)
-    dmsg("Content length in the parser (%d bytes): %s", http->dlen, http->data);
+  if (http->alen > 0)
+    dmsg("Content name in the parser (%d bytes): %s", http->alen, http->abs_path);
 
   ffinish();
-  return 1;
+  return ret;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
 }
 
 /**
@@ -773,15 +1154,16 @@ int http_deserialize(uint8_t *buf, int len, http_t *http)
  * @param slen the length of the string
  * @return the translated integer
  */
-static int char_to_int(const char *str, uint32_t slen)
+static int char_to_int(uint8_t *str, uint32_t slen, int base)
 {
   fstart("str: %s, slen: %d", str, slen);
   assert(str != NULL);
-  assert(slen > 0);
 
   int i;
   int ret = 0;
   uint8_t ch;
+
+  if (!slen) goto out;
 
   for (i=0; i<slen; i++)
   {
@@ -792,38 +1174,94 @@ static int char_to_int(const char *str, uint32_t slen)
     switch(ch)
     {
       case '0':
-        ret *= 10;
-        continue;
+        ret *= base;
+        break;
       case '1':
-        ret = ret * 10 + 1;
-        continue;
+        ret = ret * base + 1;
+        break;
       case '2':
-        ret = ret * 10 + 2;
-        continue;
+        ret = ret * base + 2;
+        break;
       case '3':
-        ret = ret * 10 + 3;
-        continue;
+        ret = ret * base + 3;
+        break;
       case '4':
-        ret = ret * 10 + 4;
-        continue;
+        ret = ret * base + 4;
+        break;
       case '5':
-        ret = ret * 10 + 5;
-        continue;
+        ret = ret * base + 5;
+        break;
       case '6':
-        ret = ret * 10 + 6;
-        continue;
+        ret = ret * base + 6;
+        break;
       case '7':
-        ret = ret * 10 + 7;
-        continue;
+        ret = ret * base + 7;
+        break;
       case '8':
-        ret = ret * 10 + 8;
-        continue;
+        ret = ret * base + 8;
+        break;
       case '9':
-        ret = ret * 10 + 9;
-        continue;
+        ret = ret * base + 9;
+        break;
+      case 'a':
+        ret = ret * base + 10;
+        break;
+      case 'b':
+        ret = ret * base + 11;
+        break;
+      case 'c':
+        ret = ret * base + 12;
+        break;
+      case 'd':
+        ret = ret * base + 13;
+        break;
+      case 'e':
+        ret = ret * base + 14;
+        break;
+      case 'f':
+        ret = ret * base + 15;
+        break;
+      default:
+        break;
     }
   }
 
+out:
   ffinish("ret: %d", ret);
+  return ret;
+}
+
+static int int_to_char(int num, uint8_t *str, int base)
+{
+  fstart("num: %d, str: %p", num, str);
+  assert(str != NULL);
+
+  int i, tmp, rem, ret;
+
+  ret = 0;
+  tmp = num;
+  for (i=0; i<10; i++)
+  {
+    rem = tmp % base;
+    if (rem > 0)
+      ret = i;
+    tmp /= base;
+  }
+
+  ret++;
+  dmsg("ret: %d", ret);
+
+  tmp = num;
+  for (i=0; i<ret; i++)
+  {
+    rem = tmp % base;
+    if (rem >= 0 && rem <= 9)
+      str[ret - i - 1] = rem + 48;
+    if (rem >= 10)
+      str[ret - i - 1] = rem + 87;
+    tmp /= base;
+  }
+
+  ffinish("str (%d bytes): %s", ret, str);
   return ret;
 }
