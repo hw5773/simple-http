@@ -5,8 +5,6 @@
 #include "debug.h"
 #include "simple_https.h"
 
-int process_error(SSL *ssl, int ret);
-
 int main(int argc, char *argv[])
 {
   http_t *req, *resp;
@@ -99,46 +97,4 @@ err:
     SSL_CTX_free(ctx);
 
   return 1;
-}
-
-int process_error(SSL *ssl, int ret)
-{
-  int err;
-  err = SSL_get_error(ssl, ret);
-
-  switch (err)
-  {
-    case SSL_ERROR_NONE:
-      dmsg("SSL_ERROR_NONE");
-      ret = 1;
-      break;
-
-    case SSL_ERROR_ZERO_RETURN:
-      dmsg("SSL_ERROR_ZERO_RETURN");
-      ret = -1;
-      break;
-
-    case SSL_ERROR_WANT_X509_LOOKUP:
-      dmsg("SSL_ERROR_WANT_X509_LOOKUP");
-      ret = 0;
-      break;
-
-    case SSL_ERROR_SYSCALL:
-      dmsg("SSL_ERROR_SYSCALL");
-      dmsg("errno: %d", errno);
-      ERR_print_errors_fp(stderr);
-      ret = -1;
-      break;
-
-    case SSL_ERROR_SSL:
-      dmsg("SSL_ERROR_SSL");
-      ERR_print_errors_fp(stderr);
-      ret = -1;
-      break;
-
-    default:
-      ret = 0;
-  }
-
-  return ret;
 }

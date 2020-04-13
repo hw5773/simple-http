@@ -1,4 +1,6 @@
 #include "simple_https.h"
+#include <errno.h>
+#include <openssl/err.h>
 
 int send_https_message(SSL *ssl, http_t *http)
 {
@@ -34,19 +36,13 @@ int recv_https_message(SSL *ssl, http_t *http, FILE *fp)
   int ret, recv;
   uint8_t buf[BUF_SIZE];
   ret = HTTP_NOT_FINISHED;
-  dmsg("http->header: %d", http->header);
   while (ret == HTTP_NOT_FINISHED)
   {
     recv = SSL_read(ssl, buf, BUF_SIZE);
     if (recv > 0)
     {
-      dmsg("Received: %d bytes", recv);
       ret = http_deserialize(buf, recv, http, fp);
       if (ret == HTTP_FAILURE) goto err;
-      if (http->resource)
-      {
-        dmsg("http->chunked: %d / http->resource->offset: %d / http->resource->size: %d", http->chunked, http->resource->offset, http->resource->size);
-      }
     }
     memset(buf, 0x0, BUF_SIZE);
   }
@@ -57,4 +53,46 @@ int recv_https_message(SSL *ssl, http_t *http, FILE *fp)
 err:
   ferr();
   return HTTP_FAILURE;
+}
+
+int process_error(SSL *ssl, int ret)
+{
+  int err;
+  err = SSL_get_error(ssl, ret);
+
+  switch (err)
+  {
+    case SSL_ERROR_NONE:
+      dmsg("SSL_ERROR_NONE");
+      ret = 1;
+      break;
+
+    case SSL_ERROR_ZERO_RETURN:
+      dmsg("SSL_ERROR_ZERO_RETURN");
+      ret = -1;
+      break;
+
+    case SSL_ERROR_WANT_X509_LOOKUP:
+      dmsg("SSL_ERROR_WANT_X509_LOOKUP");
+      ret = 0;
+      break;
+
+    case SSL_ERROR_SYSCALL:
+      dmsg("SSL_ERROR_SYSCALL");
+      dmsg("errno: %d", errno);
+      ERR_print_errors_fp(stderr);
+      ret = -1;
+      break;
+
+    case SSL_ERROR_SSL:
+      dmsg("SSL_ERROR_SSL");
+      ERR_print_errors_fp(stderr);
+      ret = -1;
+      break;
+
+    default:
+      ret = 0;
+  }
+
+  return ret;
 }

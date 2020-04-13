@@ -789,14 +789,6 @@ int http_parse_request_line(http_t *http, buf_t *line)
   p = get_next_token(line, " ", &len);
   http_parse_version(http, p, len);
 
-  // CRLF
-  p = get_next_token(line, " ", &len);
-  if (len != 2 || !IS_CRLF(p))
-  {
-    emsg("Parse the request line error");
-    goto err;
-  }
-
   ffinish();
   return HTTP_SUCCESS;
 
@@ -874,7 +866,6 @@ int http_parse_message_header(http_t *http, buf_t *line)
   if (!end) goto err;
 
   p = (char *)get_buf_curr(line);
-  dmsg("p: %s", p);
   value = strchr(p, ':');
   key = p;
   klen = value - key;
@@ -920,6 +911,14 @@ err:
   return HTTP_FAILURE;
 }
 
+int http_parse_request_message_body(http_t *http, buf_t *buf, FILE *fp)
+{
+}
+
+int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
+{
+}
+
 int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
 {
   fstart("http: %p, buf: %p", http, buf);
@@ -952,31 +951,24 @@ int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
     {
       attr = find_header_attribute(http, (char *)key2, strlen(key2));
 
-      dmsg("Content-Length attribute: %p", attr);
       if (attr)
       {
         clen = char_to_int((uint8_t *)attr->value, attr->vlen, 10);
-        dmsg("Content-Length: %d", clen);
         if (clen == 0) goto out;
       }
       else
       {
         attr = find_header_attribute(http, (char *)key3, strlen(key3));
-        dmsg("Content-Length attribute: %p", attr);
         if (attr)
         {
           clen = char_to_int((uint8_t *)attr->value, attr->vlen, 10);
-          dmsg("Content-Length: %d", clen);
           if (clen == 0) goto out;
         }
       }
     }
 
-    dmsg("http->chunked is set to %d", http->chunked);
-
     if (clen > 0 || http->chunked)
     {
-      dmsg("resource: %p", resource);
       if (!resource)
       {
         http->resource = (resource_t *)malloc(sizeof(resource_t));
@@ -1004,19 +996,14 @@ int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
       len = get_buf_remaining(buf);
       if (tlen < len)
       {
-        dmsg("\n\ntlen is different from len");
         memcpy(tbuf, p, tlen);
         fprintf(fp, "%s", tbuf);
-        printf(">>>>> (%d bytes)\n%s\n>>>>>\n", tlen, tbuf);
       }
       else
       {
-        dmsg("\n\ntlen is same with len");
         fprintf(fp, "%s", p);
-        printf(">>>>> (%d bytes)\n%s\n>>>>>\n", tlen, p);
       }
       resource->offset += tlen;
-      dmsg("resource->offset become: %d", resource->offset);
     }
 
     if (resource->offset >= resource->size)
@@ -1029,12 +1016,10 @@ int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
       p = (const char *)get_next_token(buf, CRLF, &tlen);
       
       clen = char_to_int((uint8_t *)p, tlen, 16);
-      dmsg("Chunk length: %d bytes", clen);
 
       if (tlen > 0 && !clen)
       {
         vlen = int_to_char(resource->size, tmp, 10);
-        dmsg("vlen: %d", vlen);
         add_header_attribute(http, (char *)key1, (int) strlen(key1), (char *)tmp, vlen);
         goto out;
       }
@@ -1044,7 +1029,6 @@ int http_parse_message_body(http_t *http, buf_t *buf, FILE *fp)
         resource->size += clen;
         p = (const char *)get_next_token(buf, CRLF, &tlen);
         resource->offset += tlen;
-        dmsg("resource->offset: %d / resource->size: %d", tlen, clen);
         fprintf(fp, "%s", p);
       }
     }
@@ -1090,8 +1074,6 @@ int http_deserialize(uint8_t *buf, int len, http_t *http, FILE *fp)
 
   if (!http->header)
   {
-    dmsg("inside the parser");
-    dmsg("str: %s", cptr);
     while ((nptr = strstr(cptr, CRLF)))
     {
       l = nptr - cptr;
@@ -1249,7 +1231,6 @@ static int int_to_char(int num, uint8_t *str, int base)
   }
 
   ret++;
-  dmsg("ret: %d", ret);
 
   tmp = num;
   for (i=0; i<ret; i++)

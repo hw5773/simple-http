@@ -319,7 +319,6 @@ uint8_t *get_next_token(buf_t *buf, char *str, int *len)
   ret = get_buf_curr(buf);
   ret = delete_space(ret);
   space = (uint8_t *)strstr((const char *)ret, str);
-  dmsg("space: %p, ret: %p", space, ret);
   
   if (space - buf->data > buf->max)
     space = NULL;

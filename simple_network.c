@@ -113,10 +113,7 @@ int recv_tls_message(SSL *ssl, uint8_t *buf, int max)
   do {
     rcvd = SSL_read(ssl, buf + offset, max - offset);
     if (rcvd >= 0)
-    {
-      dmsg("Received: %d bytes", rcvd);
       offset += rcvd;
-    }
     curr = get_current_timestamp();
   } while (offset <= 0 && (curr - base <= TIME_OUT));
 

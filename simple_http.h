@@ -32,8 +32,8 @@
 #define HTTP_METHOD_NONE      0
 #define HTTP_METHOD_GET       1
 #define HTTP_METHOD_POST      2
-#define HTTP_METHOD_PUT       3
-#define HTTP_METHOD_DELETE    4
+#define HTTP_METHOD_PUT       4
+#define HTTP_METHOD_DELETE    8
 
 #define HTTP_TYPE_REQUEST     0
 #define HTTP_TYPE_RESPONSE    1

@@ -6,5 +6,6 @@
 
 int send_https_message(SSL *ssl, http_t *http);
 int recv_https_message(SSL *ssl, http_t *http, FILE *fp);
+int process_error(SSL *ssl, int ret);
 
 #endif /* __SIMPLE_HTTPS_H__ */
