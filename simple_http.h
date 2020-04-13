@@ -95,6 +95,7 @@ int add_header_attribute(http_t *http, char *key, int klen, char *value, int vle
 void del_header_attribute(http_t *http, char *key, int klen);
 void print_header(http_t *http);
 
+resource_t *http_init_resource(http_t *http);
 resource_t *http_get_resource(http_t *http);
 void http_update_resource(http_t *http, int sent);
 

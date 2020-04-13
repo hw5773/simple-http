@@ -1,6 +1,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "debug.h"
 #include "simple_https.h"
@@ -128,6 +129,10 @@ int main(int argc, char *argv[])
     ret = send_https_message(ssl, resp);
   if (ret != HTTP_SUCCESS) goto err;
 
+  SSL_shutdown(ssl);
+  close(client);
+  close(server);
+
   if (ssl)
     SSL_free(ssl);
   ssl = NULL;
@@ -159,15 +164,13 @@ int process_index(http_t *req, http_t *resp)
   resource_t *resource;
   uint8_t *buf;
 
-  resource = (resource_t *)malloc(sizeof(resource_t));
+  resource = http_init_resource(resp);
   buf = (uint8_t *)malloc(7);
   memcpy(buf, "Hello!\n", 7);
 
   resource->type = HTTP_RESOURCE_MEM;
   resource->ptr = (void *)buf;
   resource->size = 7;
-
-  resp->resource = resource;
 
   ffinish();
   return HTTP_SUCCESS;

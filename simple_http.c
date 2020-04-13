@@ -379,6 +379,20 @@ void print_header(http_t *http)
   ffinish();
 }
 
+resource_t *http_init_resource(http_t *http)
+{
+  fstart("http: %p", http);
+  assert(http != NULL);
+
+  resource_t *ret;
+  ret = (resource_t *)malloc(sizeof(resource_t));
+  memset(ret, 0x0, sizeof(resource_t));
+  http->resource = ret;
+
+  ffinish("ret: %p", ret);
+  return ret;
+}
+
 resource_t *http_get_resource(http_t *http)
 {
   fstart("http: %p", http);
@@ -588,55 +602,203 @@ err:
   return HTTP_FAILURE;
 }
 
-int http_make_message_body(http_t *http, buf_t *msg)
+int http_make_chunked_message_body(http_t *http, buf_t *msg)
 {
   fstart("http: %p, msg: %p", http, msg);
+  assert(http != NULL);
+  assert(msg != NULL);
+
+  int ret, remaining, len, tlen;
+  FILE *fp;
+  uint8_t *buf;
+  uint8_t tmp[10];
+  resource_t *resource;
+
+  ret = HTTP_SUCCESS;
+  len = 0;
+  fp = NULL;
+  buf = NULL;
+  resource = http_get_resource(http);
+  dmsg("resource: %p", resource);
+  dmsg("resource->offset already?: %d", resource->offset);
+
+  if (!http->body)
+  {
+    remaining = get_buf_remaining(msg);
+    tlen = int_to_char(resource->size, tmp, 16);
+
+    if (remaining < tlen + CRLF_LEN)
+    {
+      ret = HTTP_NOT_FINISHED;
+      goto out;
+    }
+
+    update_buf_mem(msg, tmp, tlen);
+    ADD_CRLF(msg);
+
+    http->body = 1;
+  }
+
+  remaining = get_buf_remaining(msg);
+  if (resource->type == HTTP_RESOURCE_MEM)
+  {
+    dmsg("resource->ptr: %p, resource->offset: %d", resource->ptr, resource->offset);
+    buf = (uint8_t *)resource->ptr + resource->offset;
+    dmsg("buf: %p", buf);
+    if (remaining >= resource->size - resource->offset)
+      len = resource->size - resource->offset;
+    else
+      len = remaining;
+    dmsg("len: %d", len);
+    update_buf_mem(msg, buf, len);
+  }
+  else if (resource->type == HTTP_RESOURCE_FILE)
+  {
+    dmsg("resource->ptr: %p", resource->ptr);
+    fp = (FILE *)resource->ptr;
+    dmsg("fp: %p", fp);
+    buf = (uint8_t *)malloc(BUF_SIZE);
+    dmsg("buf: %p", buf);
+      
+    fseek(fp, resource->offset, SEEK_SET);
+    if (remaining >= resource->size - resource->offset)
+      len = resource->size - resource->offset;
+    else
+      len = remaining;
+    dmsg("len: %d", len);
+    fread(buf, 1, len, fp);
+    update_buf_mem(msg, buf, len);
+    free(buf);
+  }
+  resource->offset += len;
+
+  if (resource->offset == resource->size)
+  {
+    if (remaining < 2)
+    {
+      ret = HTTP_NOT_FINISHED;
+      goto out;
+    }
+    ADD_CRLF(msg);
+
+    remaining = get_buf_remaining(msg);
+    if (remaining < 5)
+    {
+      ret = HTTP_NOT_FINISHED;
+      goto out;
+    }
+    add_buf_char(msg, '0');
+    ADD_CRLF(msg);
+    ADD_CRLF(msg);
+  }
+  else
+    ret = HTTP_NOT_FINISHED;
+
+out:
+  ffinish("ret: %d", ret);
+  return ret;
+}
+
+int http_make_non_chunked_message_body(http_t *http, buf_t *msg)
+{
+  fstart("http: %p, msg: %p", http, msg);
+  assert(http != NULL);
+  assert(msg != NULL);
 
   int ret, remaining, len;
   FILE *fp;
   uint8_t *buf;
   resource_t *resource;
-
+  
   ret = HTTP_SUCCESS;
+  len = 0;
   fp = NULL;
   buf = NULL;
   resource = http_get_resource(http);
+  dmsg("resource: %p", resource);
+  dmsg("resource->offset already?: %d", resource->offset);
+
+  remaining = get_buf_remaining(msg);
+  dmsg("remaining: %d", remaining);
+  if (resource->type == HTTP_RESOURCE_MEM)
+  {
+    dmsg("resource->ptr: %p, resource->offset: %d", resource->ptr, resource->offset);
+    buf = (uint8_t *)resource->ptr + resource->offset;
+    dmsg("buf: %p", buf);
+    if (remaining >= resource->size - resource->offset)
+      len = resource->size - resource->offset;
+    else
+      len = remaining;
+    dmsg("len: %d", len);
+    update_buf_mem(msg, buf, len);
+  }
+  else if (resource->type == HTTP_RESOURCE_FILE)
+  {
+    dmsg("resource->ptr: %p", resource->ptr);
+    fp = (FILE *)resource->ptr;
+    dmsg("fp: %p", fp);
+    buf = (uint8_t *)malloc(BUF_SIZE);
+    if (!buf) goto err;
+    memset(buf, 0x0, BUF_SIZE);
+    dmsg("buf: %p", buf);
+      
+    fseek(fp, resource->offset, SEEK_SET);
+    if (remaining >= resource->size - resource->offset)
+      len = resource->size - resource->offset;
+    else
+      len = remaining;
+    dmsg("len: %d", len);
+    fread(buf, 1, len, fp);
+    update_buf_mem(msg, buf, len);
+    free(buf);
+  }
+  resource->offset += len;
+    
+  remaining = get_buf_remaining(msg);
+  dmsg("remaining: %d", remaining);
+  if (!remaining)
+    ret = HTTP_SUCCESS;
+  else
+    ret = HTTP_NOT_FINISHED;
+
+  ffinish("ret: %d", ret);
+  return ret;
+
+err:
+  ferr();
+  return HTTP_FAILURE;
+}
+
+int http_make_message_body(http_t *http, buf_t *msg)
+{
+  fstart("http: %p, msg: %p", http, msg);
+
+  int ret;
+  resource_t *resource;
+  attribute_t *attr;
+  char *key, *value;
+
+  key = "Transfer-Encoding";
+  value = "chunked";
+
+  ret = HTTP_SUCCESS;
+  resource = http_get_resource(http);
+  dmsg("resource: %p", resource);
 
   if (resource)
   {
-    remaining = get_buf_remaining(msg);
-    if (resource->type == HTTP_RESOURCE_MEM)
-    {
-      buf = (uint8_t *)resource->ptr + resource->offset;
-      if (remaining >= resource->size - resource->offset)
-        len = resource->size - resource->offset;
-      else
-        len = remaining;
-      update_buf_mem(msg, buf, len);
-    }
-    else if (resource->type == HTTP_RESOURCE_FILE)
-    {
-      fp = (FILE *)resource->ptr;
-      buf = (uint8_t *)malloc(BUF_SIZE);
-      
-      fseek(fp, resource->offset, SEEK_SET);
-      if (remaining >= resource->size - resource->offset)
-        len = resource->size - resource->offset;
-      else
-        len = remaining;
-      fread(buf, 1, len, fp);
-      update_buf_mem(msg, buf, len);
-      free(buf);
-    }
-    
-    remaining = get_buf_remaining(msg);
-    if (!remaining)
-      ret = HTTP_SUCCESS;
+    attr = find_header_attribute(http, key, (int)strlen(key));
+
+    if (attr && (attr->vlen == strlen(value)) && !strncmp(attr->value, value, attr->vlen))
+      http->chunked = 1;
+
+    if (http->chunked)
+      ret = http_make_chunked_message_body(http, msg);
     else
-      ret = HTTP_NOT_FINISHED;
+      ret = http_make_non_chunked_message_body(http, msg);
   }
 
-  ffinish();
+  ffinish("ret: %d", ret);
   return ret;
 }
 
@@ -1084,8 +1246,7 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
     {
       if (!resource)
       {
-        http->resource = (resource_t *)malloc(sizeof(resource_t));
-        memset(http->resource, 0x0, sizeof(resource_t));
+        http->resource = http_init_resource(http);
         resource = http_get_resource(http);
         resource->type = HTTP_RESOURCE_FILE;
       }
@@ -1122,6 +1283,7 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
     if (resource->offset >= resource->size)
     {
       next = 1;
+      dmsg("resource->offset >= resource->size");
     }
 
     if (next)
@@ -1129,10 +1291,12 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
       p = (const char *)get_next_token(buf, CRLF, &tlen);
       
       clen = char_to_int((uint8_t *)p, tlen, 16);
+      dmsg("tlen: %d, clen: %d", tlen, clen);
 
       if (tlen > 0 && !clen)
       {
         vlen = int_to_char(resource->size, tmp, 10);
+        dmsg("vlen: %d", vlen);
         add_header_attribute(http, (char *)key1, (int) strlen(key1), (char *)tmp, vlen);
         goto out;
       }

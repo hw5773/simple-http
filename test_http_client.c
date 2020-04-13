@@ -14,10 +14,10 @@ int main(int argc, char *argv[])
 
   int sock, err, port, ret;
   char *key, *value;
-  const char *domain = "www.cloudflare.com";
+  const char *domain = "www.edgeplatform.com";
   const uint8_t http1_1[] = {0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'};
   FILE *fp;
-  port = 443;
+  port = 5555;
   err = 0;
 
   fp = fopen("index.html", "w");

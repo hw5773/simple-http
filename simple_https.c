@@ -13,7 +13,10 @@ int send_https_message(SSL *ssl, http_t *http)
   while (ret == HTTP_NOT_FINISHED)
   {
     ret = http_serialize(http, buf, BUF_SIZE, &len);
-    dmsg("HTTP request (%d bytes):\n%s", len, buf);
+    if (http->type == HTTP_TYPE_REQUEST)
+      dmsg("HTTP request (%d bytes):\n%s", len, buf);
+    else if (http->type == HTTP_TYPE_RESPONSE)
+      dmsg("HTTP response (%d bytes):\n%s", len, buf);
     sent = SSL_write(ssl, buf, len);
     if (sent > 0)
       http_update_resource(http, sent);
