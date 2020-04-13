@@ -162,7 +162,7 @@ void http_set_abs_path(http_t *http, const char *abs_path, int alen)
   ffinish();
 }
 
-void http_set_default_attributes(http_t *http)
+void http_set_default_request_attributes(http_t *http)
 {
   fstart("http: %p", http);
   assert(http != NULL);
@@ -178,6 +178,56 @@ void http_set_default_attributes(http_t *http)
 
   add_header_attribute(http, (char *) accept_key, (int) strlen(accept_key),
       (char *) accept_value, (int) strlen(accept_value));
+
+  ffinish();
+}
+
+void http_set_default_response_attributes(http_t *http)
+{
+  fstart("http: %p", http);
+  assert(http != NULL);
+
+  const char *expires_key = "Expires";
+  const char *expires_value = "-1";
+
+  const char *content_type_key = "Content-Type";
+  const char *content_type_value = "text/html; charset=utf-8";
+
+  const char *transfer_encoding_key = "Transfer-Encoding";
+  const char *transfer_encoding_value = "chunked";
+
+  const char *vary_key = "Vary";
+  const char *vary_value = "Accept-Encoding";
+
+  add_header_attribute(http, (char *) expires_key, (int) strlen(expires_key),
+      (char *) expires_value, (int) strlen(expires_value));
+
+  add_header_attribute(http, (char *) content_type_key, (int) strlen(content_type_key),
+      (char *) content_type_value, (int) strlen(content_type_value));
+
+  add_header_attribute(http, (char *) transfer_encoding_key, (int) strlen(transfer_encoding_key),
+      (char *) transfer_encoding_value, (int) strlen(transfer_encoding_value));
+
+  add_header_attribute(http, (char *) vary_key, (int) strlen(vary_key),
+      (char *) vary_value, (int) strlen(vary_value));
+
+  ffinish();
+}
+
+void http_set_default_attributes(http_t *http)
+{
+  fstart("http: %p", http);
+  assert(http != NULL);
+
+  if (http->type == HTTP_TYPE_REQUEST)
+    http_set_default_request_attributes(http);
+  else if (http->type == HTTP_TYPE_RESPONSE)
+    http_set_default_response_attributes(http);
+  else
+  {
+    emsg("Unsupported type: %d", http->type);
+    abort();
+  }
 
   ffinish();
 }
@@ -542,14 +592,48 @@ int http_make_message_body(http_t *http, buf_t *msg)
 {
   fstart("http: %p, msg: %p", http, msg);
 
-  int ret;
+  int ret, remaining, len;
+  FILE *fp;
+  uint8_t *buf;
   resource_t *resource;
 
   ret = HTTP_SUCCESS;
+  fp = NULL;
+  buf = NULL;
   resource = http_get_resource(http);
 
   if (resource)
   {
+    remaining = get_buf_remaining(msg);
+    if (resource->type == HTTP_RESOURCE_MEM)
+    {
+      buf = (uint8_t *)resource->ptr + resource->offset;
+      if (remaining >= resource->size - resource->offset)
+        len = resource->size - resource->offset;
+      else
+        len = remaining;
+      update_buf_mem(msg, buf, len);
+    }
+    else if (resource->type == HTTP_RESOURCE_FILE)
+    {
+      fp = (FILE *)resource->ptr;
+      buf = (uint8_t *)malloc(BUF_SIZE);
+      
+      fseek(fp, resource->offset, SEEK_SET);
+      if (remaining >= resource->size - resource->offset)
+        len = resource->size - resource->offset;
+      else
+        len = remaining;
+      fread(buf, 1, len, fp);
+      update_buf_mem(msg, buf, len);
+      free(buf);
+    }
+    
+    remaining = get_buf_remaining(msg);
+    if (!remaining)
+      ret = HTTP_SUCCESS;
+    else
+      ret = HTTP_NOT_FINISHED;
   }
 
   ffinish();

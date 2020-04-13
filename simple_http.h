@@ -53,6 +53,7 @@ typedef struct resource_st {
   int type;
   int size;
   int offset;
+  void *ptr;
 } resource_t;
 
 typedef struct http_st {

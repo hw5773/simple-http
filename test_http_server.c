@@ -7,7 +7,8 @@
 #include "simple_http_callbacks.h"
 
 int process_index(http_t *req, http_t *resp);
-int process_test(http_t *req, http_t *resp);
+int process_json(http_t *req, http_t *resp);
+int process_file(http_t *req, http_t *resp);
 
 int main(int argc, char *argv[])
 {
@@ -72,8 +73,10 @@ int main(int argc, char *argv[])
   ret = register_callback(cbs, HTTP_METHOD_GET, "/", 1, process_index);
   if (ret != HTTP_SUCCESS) goto err;
 
-  ret = register_callback(cbs, HTTP_METHOD_GET, "/test", 5, process_test);
+  ret = register_callback(cbs, HTTP_METHOD_GET, "/json", 5, process_json);
   if (ret != HTTP_SUCCESS) goto err;
+
+  ret = register_callback(cbs, HTTP_METHOD_GET, "/file", 5, process_file);
 
   print_callbacks(cbs);
 
@@ -99,6 +102,7 @@ int main(int argc, char *argv[])
 
   resp = init_http_message(HTTP_TYPE_RESPONSE);
   if (!resp) goto err;
+  http_set_default_attributes(resp);
 
   while (!err)
   {
@@ -152,17 +156,40 @@ int process_index(http_t *req, http_t *resp)
 
   dmsg("process_index()!");
 
+  resource_t *resource;
+  uint8_t *buf;
+
+  resource = (resource_t *)malloc(sizeof(resource_t));
+  buf = (uint8_t *)malloc(7);
+  memcpy(buf, "Hello!\n", 7);
+
+  resource->type = HTTP_RESOURCE_MEM;
+  resource->ptr = (void *)buf;
+  resource->size = 7;
+
+  resp->resource = resource;
+
   ffinish();
   return HTTP_SUCCESS;
 }
 
-int process_test(http_t *req, http_t *resp)
+int process_json(http_t *req, http_t *resp)
 {
   fstart("req: %p, resp: %p", req, resp);
   assert(req != NULL);
   assert(resp != NULL);
 
-  dmsg("process_test()!");
+  dmsg("process_json()!");
+
+  ffinish();
+  return HTTP_SUCCESS;
+}
+
+int process_file(http_t *req, http_t *resp)
+{
+  fstart("req: %p, resp: %p", req, resp);
+  assert(req != NULL);
+  assert(resp != NULL);
 
   ffinish();
   return HTTP_SUCCESS;
