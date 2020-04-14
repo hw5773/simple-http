@@ -315,9 +315,9 @@ uint8_t *get_next_token(buf_t *buf, char *str, int *len)
   assert(buf != NULL);
   assert(len != NULL);
 
-  uint8_t *ret, *space;
-  ret = get_buf_curr(buf);
-  ret = delete_space(ret);
+  uint8_t *start, *ret, *space;
+  start = get_buf_curr(buf);
+  ret = delete_space(start);
   space = (uint8_t *)strstr((const char *)ret, str);
   
   if (space - buf->data > buf->max)
@@ -330,7 +330,7 @@ uint8_t *get_next_token(buf_t *buf, char *str, int *len)
   else if (space > ret)
   {
     *len = space - ret;
-    buf->offset += *len + strlen(str);
+    buf->offset += (space - start) + strlen(str);
   }
   else
   {

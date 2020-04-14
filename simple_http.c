@@ -1204,23 +1204,28 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
   resource_t *resource;
   const char *key1, *key2, *key3, *chunked, *p;
   uint8_t tmp[10] = {0, };
-  uint8_t tbuf[BUF_SIZE] = {0, };
-  int len, clen, tlen, vlen, next;
+  uint8_t tbuf[BUF_SIZE + 1] = {0, };
+  int len, clen, tlen, vlen;
   key1 = "Transfer-Encoding";
   key2 = "Content-Length";
   key3 = "Content-length";
   chunked = "chunked";
   len = 0;
   clen = 0;
-  next = 0;
 
   resource = http_get_resource(http);
   if (!http->body)
   {
     attr = find_header_attribute(http, (char *)key1, strlen(key1));
     if (attr)
+    {
       if (!strncmp(attr->value, chunked, attr->vlen))
+      {
         http->chunked = 1;
+        p = (const char *)get_next_token(buf, CRLF, &tlen);
+        clen = char_to_int((uint8_t *)p, tlen, 16);
+      }
+    }
 
     if (!http->chunked)
     {
@@ -1249,13 +1254,10 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
         http->resource = http_init_resource(http);
         resource = http_get_resource(http);
         resource->type = HTTP_RESOURCE_FILE;
-      }
-
-      if (http->chunked)
-        resource->size = 0;
-      else if (clen > 0)
         resource->size = clen;
-      resource->offset = 0;
+        resource->offset = 0;
+        dmsg("Size of the first chunk: %d", clen);
+      }
     }
 
     http->body = 1;
@@ -1264,50 +1266,38 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
   // Transfer-Encoding: chunked
   if (http->chunked)
   {
-    if (resource->offset < resource->size)
+    while (1)
     {
-      p = (const char *)get_next_token(buf, CRLF, &tlen);
-      len = get_buf_remaining(buf);
-      if (tlen < len)
+      if (resource->offset < resource->size)
       {
-        memcpy(tbuf, p, tlen);
-        fprintf(fp, "%s", tbuf);
-      }
-      else
-      {
-        fprintf(fp, "%s", p);
-      }
-      resource->offset += tlen;
-    }
-
-    if (resource->offset >= resource->size)
-    {
-      next = 1;
-      dmsg("resource->offset >= resource->size");
-    }
-
-    if (next)
-    {
-      p = (const char *)get_next_token(buf, CRLF, &tlen);
-      
-      clen = char_to_int((uint8_t *)p, tlen, 16);
-      dmsg("tlen: %d, clen: %d", tlen, clen);
-
-      if (tlen > 0 && !clen)
-      {
-        vlen = int_to_char(resource->size, tmp, 10);
-        dmsg("vlen: %d", vlen);
-        add_header_attribute(http, (char *)key1, (int) strlen(key1), (char *)tmp, vlen);
-        goto out;
-      }
-
-      if (clen > 0)
-      {
-        resource->size += clen;
         p = (const char *)get_next_token(buf, CRLF, &tlen);
+        memcpy(tbuf, p, tlen);
+        tbuf[tlen] = 0;
+        fprintf(fp, "%s", tbuf);
         resource->offset += tlen;
-        fprintf(fp, "%s", p);
+        dmsg("resource->offset is set from %d to %d (%d added, total: %d)", resource->offset - len, resource->offset, tlen, resource->size);
       }
+
+      if (resource->offset == resource->size)
+      {
+        p = (const char *)get_next_token(buf, CRLF, &tlen);
+      
+        clen = char_to_int((uint8_t *)p, tlen, 16);
+        dmsg("tlen: %d, clen: %d", tlen, clen);
+
+        if (!tlen) break;
+        if (tlen > 0 && clen == 0)
+        {
+          vlen = int_to_char(resource->size, tmp, 10);
+          dmsg("vlen: %d", vlen);
+          add_header_attribute(http, (char *)key1, (int) strlen(key1), (char *)tmp, vlen);
+          goto out;
+        }
+
+        if (clen > 0)
+          resource->size += clen;
+      }
+      else break;
     }
   }
   else
@@ -1323,6 +1313,7 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
       goto out;
   }
 
+  dmsg("resource->offset: %d, resource->size: %d", resource->offset, resource->size);
   ffinish();
   return HTTP_NOT_FINISHED;
 
