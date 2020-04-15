@@ -102,4 +102,8 @@ void http_update_resource(http_t *http, int sent);
 int http_serialize(http_t *http, uint8_t *msg, int max, int *mlen);
 int http_deserialize(uint8_t *buf, int len, http_t *http, FILE *fp);
 
+int char_to_int(uint8_t *str, uint32_t slen, int base);
+int int_to_char(int num, uint8_t *str, int base);
+
+
 #endif /* __SIMPLE_HTTP_H__ */

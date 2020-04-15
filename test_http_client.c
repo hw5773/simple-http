@@ -15,6 +15,7 @@ int main(int argc, char *argv[])
   int sock, err, port, ret;
   char *key, *value;
   const char *domain = "www.edgeplatform.com";
+  const char *abs_path = "/list";
   const uint8_t http1_1[] = {0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'};
   FILE *fp;
   port = 5555;
@@ -31,6 +32,7 @@ int main(int argc, char *argv[])
   http_set_method(req, HTTP_METHOD_GET);
   http_set_domain(req, domain, (int) strlen(domain));
   http_set_default_attributes(req);
+  http_set_abs_path(req, abs_path, (int) strlen(abs_path));
 
   key = "Accept-Encoding";
   value = "gzip, deflate";

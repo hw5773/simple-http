@@ -1,9 +1,6 @@
 #include "simple_http.h"
 #include <ctype.h>
 
-static int char_to_int(uint8_t *str, uint32_t slen, int base);
-static int int_to_char(int num, uint8_t *str, int base);
-
 void init_http_module(void)
 {
   init_http_status();
@@ -519,7 +516,8 @@ int http_make_request_line(http_t *http, buf_t *msg)
   if (http->abs_path && http->alen > 0)
     ret = update_buf_mem(msg, (uint8_t *)http->abs_path, http->alen);
   else
-    ret = update_buf_mem(msg, (uint8_t *)"/ ", 2);
+    ret = update_buf_mem(msg, (uint8_t *)"/", 1);
+  add_buf_char(msg, ' ');
 
   ret = http_make_version(http, msg);
   if (ret != HTTP_SUCCESS) goto err;
@@ -1205,6 +1203,7 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
   const char *key1, *key2, *key3, *chunked, *p;
   uint8_t tmp[10] = {0, };
   uint8_t tbuf[BUF_SIZE + 1] = {0, };
+  uint8_t *ptr, *tmem;
   int len, clen, tlen, vlen;
   key1 = "Transfer-Encoding";
   key2 = "Content-Length";
@@ -1212,6 +1211,7 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
   chunked = "chunked";
   len = 0;
   clen = 0;
+  tmem = NULL;
 
   resource = http_get_resource(http);
   if (!http->body)
@@ -1224,6 +1224,12 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
         http->chunked = 1;
         p = (const char *)get_next_token(buf, CRLF, &tlen);
         clen = char_to_int((uint8_t *)p, tlen, 16);
+
+        if (!fp)
+        {
+          tmem = (uint8_t *)malloc(BUF_SIZE + 1);
+          ptr = tmem;
+        }
       }
     }
 
@@ -1273,7 +1279,17 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
         p = (const char *)get_next_token(buf, CRLF, &tlen);
         memcpy(tbuf, p, tlen);
         tbuf[tlen] = 0;
-        fprintf(fp, "%s", tbuf);
+        if (fp)
+          fprintf(fp, "%s", tbuf);
+        else
+        {
+          if (tmem)
+          {
+            memcpy(ptr, tbuf, tlen);
+            ptr += tlen;
+          }
+        }
+
         resource->offset += tlen;
         dmsg("resource->offset is set from %d to %d (%d added, total: %d)", resource->offset - len, resource->offset, tlen, resource->size);
       }
@@ -1290,7 +1306,10 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
         {
           vlen = int_to_char(resource->size, tmp, 10);
           dmsg("vlen: %d", vlen);
-          add_header_attribute(http, (char *)key1, (int) strlen(key1), (char *)tmp, vlen);
+          add_header_attribute(http, (char *)key2, (int) strlen(key2), (char *)tmp, vlen);
+         
+          if (!fp && tmem)
+            resource->ptr = (void *)tmem;
           goto out;
         }
 
@@ -1304,10 +1323,21 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
   {
     if (resource->offset < resource->size)
     {
-      p = (const char *)get_buf_curr(buf);
-      len = get_buf_remaining(buf);
-      fprintf(fp, "%s", p);
-      resource->offset += len;
+      p = (const char *)get_next_token(buf, CRLF, &tlen);
+      memcpy(tbuf, p, tlen);
+      tbuf[tlen] = 0;
+
+      if (fp)
+        fprintf(fp, "%s", tbuf);
+      else
+      {
+        if (tmem)
+        {
+          memcpy(ptr, tbuf, tlen);
+          ptr += tlen;
+        }
+      }
+      resource->offset += tlen;
     }
     else
       goto out;
@@ -1433,7 +1463,7 @@ err:
  * @param slen the length of the string
  * @return the translated integer
  */
-static int char_to_int(uint8_t *str, uint32_t slen, int base)
+int char_to_int(uint8_t *str, uint32_t slen, int base)
 {
   fstart("str: %s, slen: %d", str, slen);
   assert(str != NULL);
@@ -1510,7 +1540,7 @@ out:
   return ret;
 }
 
-static int int_to_char(int num, uint8_t *str, int base)
+int int_to_char(int num, uint8_t *str, int base)
 {
   fstart("num: %d, str: %p", num, str);
   assert(str != NULL);

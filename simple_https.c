@@ -85,13 +85,11 @@ int process_error(SSL *ssl, int ret)
     case SSL_ERROR_SYSCALL:
       dmsg("SSL_ERROR_SYSCALL");
       dmsg("errno: %d", errno);
-      ERR_print_errors_fp(stderr);
       ret = -1;
       break;
 
     case SSL_ERROR_SSL:
       dmsg("SSL_ERROR_SSL");
-      ERR_print_errors_fp(stderr);
       ret = -1;
       break;
 

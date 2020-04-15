@@ -43,7 +43,6 @@ err:
 buf_t *init_memcpy_buf_mem(buf_t *buf, uint8_t *data, int len)
 {
   fstart("buf: %p, data: %p, len: %d", buf, data, len);
-  assert(buf != NULL);
   assert(len > 0);
 
   buf_t *ret;
@@ -326,6 +325,7 @@ uint8_t *get_next_token(buf_t *buf, char *str, int *len)
   if (!space)
   {
     *len = get_buf_remaining(buf);
+    buf->offset += *len;
   }
   else if (space > ret)
   {
@@ -335,6 +335,7 @@ uint8_t *get_next_token(buf_t *buf, char *str, int *len)
   else
   {
     *len = get_buf_remaining(buf);
+    buf->offset += *len;
   }
 
   ffinish();
