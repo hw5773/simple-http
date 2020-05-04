@@ -48,8 +48,8 @@ int recv_https_message(SSL *ssl, http_t *http, FILE *fp)
       if (ret == HTTP_FAILURE) goto err;
     }
     memset(buf, 0x0, BUF_SIZE);
-    if (http->resource)
-      dmsg("offset: %d, size: %d", http->resource->offset, http->resource->size);
+//    if (http->resource)
+//      dmsg("recv: %d, offset: %d, size: %d", recv, http->resource->offset, http->resource->size);
   }
 
   ffinish();

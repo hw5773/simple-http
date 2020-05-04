@@ -14,11 +14,11 @@ int main(int argc, char *argv[])
 
   int sock, err, port, ret;
   char *key, *value;
-  const char *domain = "www.edgeplatform.com";
-  const char *abs_path = "/list";
+  const char *domain = "www.google.com";
+  const char *abs_path = "/";
   const uint8_t http1_1[] = {0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'};
   FILE *fp;
-  port = 5555;
+  port = 443;
   err = 0;
 
   fp = fopen("index.html", "w");

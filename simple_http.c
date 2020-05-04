@@ -1294,7 +1294,8 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
         dmsg("resource->offset is set from %d to %d (%d added, total: %d)", resource->offset - len, resource->offset, tlen, resource->size);
       }
 
-      if (resource->offset == resource->size)
+      //if (resource->offset == resource->size)
+      if (resource->offset >= resource->size)
       {
         p = (const char *)get_next_token(buf, CRLF, &tlen);
       
@@ -1323,9 +1324,19 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
   {
     if (resource->offset < resource->size)
     {
-      p = (const char *)get_next_token(buf, CRLF, &tlen);
-      memcpy(tbuf, p, tlen);
-      tbuf[tlen] = 0;
+      if (resource->size - resource->offset <= BUF_SIZE)
+      {
+        p = (const char *)get_buf_curr(buf);
+        tlen = resource->size - resource->offset;
+        memcpy(tbuf, p, tlen);
+        tbuf[tlen] = 0;
+      }
+      else
+      {
+        p = (const char *)get_next_token(buf, CRLF, &tlen);
+        memcpy(tbuf, p, tlen);
+        tbuf[tlen] = 0;
+      }
 
       if (fp)
         fprintf(fp, "%s", tbuf);
@@ -1339,11 +1350,14 @@ int http_parse_response_message_body(http_t *http, buf_t *buf, FILE *fp)
       }
       resource->offset += tlen;
     }
-    else
+
+    //if (resource->offset == resource->size)
+    if (resource->offset >= resource->size)
       goto out;
   }
 
   dmsg("resource->offset: %d, resource->size: %d", resource->offset, resource->size);
+
   ffinish();
   return HTTP_NOT_FINISHED;
 
@@ -1385,7 +1399,7 @@ int http_deserialize(uint8_t *buf, int len, http_t *http, FILE *fp)
 {
   fstart("buf: %p, len: %d, http: %p", buf, len, http);
   assert(buf != NULL);
-  assert(len > 0);
+  //assert(len > 0);
   assert(http != NULL);
 
   const char *cptr, *nptr, *p;
